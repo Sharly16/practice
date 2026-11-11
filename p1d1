@@ -15,3 +15,9 @@ SHOW CREATE TABLE default.ltmirun22_p1d1_realtime_high_value_sales;
 spark.sql("""
 SHOW CREATE TABLE default.ltmirun22_p1d1_realtime_high_value_sales
 """).show(truncate=False)
+
+result = spark.sql("""
+SHOW CREATE TABLE default.ltmirun22_p1d1_realtime_high_value_sales
+""").collect()
+
+print(result[0][0])
