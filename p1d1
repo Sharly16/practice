@@ -5,3 +5,5 @@ ALTER TABLE default.ltmirun25_p1d1_bronze_sales
 RENAME COLUMN customerid TO customer_id;
 
 DESCRIBE default.ltmirun25_p1d1_bronze_sales;
+
+SHOW TABLES IN default;
