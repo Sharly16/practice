@@ -11,3 +11,7 @@ SHOW TABLES IN default;
 SHOW CREATE TABLE default.ltmirun25_p1d1_bronze_sales;
 
 SHOW CREATE TABLE default.ltmirun22_p1d1_realtime_high_value_sales;
+
+spark.sql("""
+SHOW CREATE TABLE default.ltmirun22_p1d1_realtime_high_value_sales
+""").show(truncate=False)
