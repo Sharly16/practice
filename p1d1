@@ -21,3 +21,13 @@ SHOW CREATE TABLE default.ltmirun22_p1d1_realtime_high_value_sales
 """).collect()
 
 print(result[0][0])
+
+CREATE VIEW default.ltmirun25_p1d1_realtime_high_value_sales AS
+SELECT
+    transaction_id,
+    customer_id,
+    amount
+FROM default.ltmirun25_p1d1_bronze_sales
+WHERE amount > 1000;
+
+SHOW CREATE TABLE default.ltmirun25_p1d1_realtime_high_value_sales;
