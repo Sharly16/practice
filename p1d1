@@ -7,3 +7,7 @@ RENAME COLUMN customerid TO customer_id;
 DESCRIBE default.ltmirun25_p1d1_bronze_sales;
 
 SHOW TABLES IN default;
+
+SHOW CREATE TABLE default.ltmirun25_p1d1_bronze_sales;
+
+SHOW CREATE TABLE default.ltmirun22_p1d1_realtime_high_value_sales;
