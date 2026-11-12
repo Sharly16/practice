@@ -20,6 +20,8 @@ result = spark.sql("""
 SHOW CREATE TABLE default.ltmirun22_p1d1_realtime_high_value_sales
 """).collect()
 
+https://app.snowflake.com/ptebvlu/ow30701/#/homepage
+
 print(result[0][0])
 
 CREATE VIEW default.ltmirun25_p1d1_realtime_high_value_sales AS
