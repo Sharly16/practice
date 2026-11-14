@@ -1,5 +1,1 @@
-docker inspect kafka-1 --format '{{json .HostConfig.PortBindings}}'
-
-docker compose ls
-
-docker inspect kafka-1 --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}'
+docker exec kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:19092 --describe --topic day4_orders
