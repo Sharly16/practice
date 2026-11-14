@@ -217,3 +217,7 @@ SET good_qid = LAST_QUERY_ID();
 SELECT
     $bad_qid AS BAD_QUERY_ID,
     $good_qid AS GOOD_QUERY_ID;
+
+
+
+docker exec kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
