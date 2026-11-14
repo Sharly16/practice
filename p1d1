@@ -1,1 +1,12 @@
 python produce_events.py --file ../Data/retail_order_events.jsonl --limit 100
+
+../.venv/bin/python produce_events.py --file ../Data/retail_order_events.jsonl --start 100 --limit 50
+
+python produce_events.py --file ../Data/retail_order_events.jsonl --start 100 --limit 50
+
+./check_groups.sh
+
+python consumer_worker.py --group day4_analytics
+
+./check_groups.sh
+03_after_recovery.png
