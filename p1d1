@@ -1,15 +1,1 @@
-docker exec kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:19092 --describe --topic day4_orders
-
-
-cd "/home/student/Downloads/Day04_Kafka Streaming Reliability-20261113T112951Z-1-001/Day04_Kafka Streaming Reliability/Artefacts"
-
-chmod +x Scripts/*.sh
-
-python3 -m pip install -r Scripts/requirements.txt
-
-cd Scripts
-docker compose up -d
-
-./admin_setup.sh
-
-./check_topics.sh
+python produce_events.py --file ../Data/retail_order_events.jsonl --limit 100
