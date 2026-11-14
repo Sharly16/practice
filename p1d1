@@ -1,10 +1,7 @@
+docker exec kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:19092 --list
 
+docker exec kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:19092 --create --topic telemetry-stream-sharlypricilla-albertwilson-p1d4 --partitions 3 --replication-factor 1 --config retention.ms=86400000
 
-docker exec kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
+docker exec kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:19092 --describe --topic telemetry-stream-sharlypricilla-albertwilson-p1d4
 
-docker inspect kafka-1 --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{$v.IPAddress}}{{end}}'
-
-docker inspect kafka-2 --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{$v.IPAddress}}{{end}}'
-
-docker inspect kafka-3 --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{$v.IPAddress}}{{end}}'
-docker inspect kafka-1 --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -i listener
+docker exec kafka-1 /opt/kafka/bin/kafka-configs.sh --bootstrap-server kafka-1:19092 --entity-type topics --entity-name telemetry-stream-sharlypricilla-albertwilson-p1d4 --describe
