@@ -1,18 +1,4 @@
-python produce_events.py \
-  --bootstrap localhost:29092 \
-  --topic day4_orders \
-  --file ../Data/retail_order_events.jsonl \
-  --start 0 \
-  --limit 100
+sort -t',' -k7,7nr kafka_lag_snapshots.csv | head -6
 
-python consumer_worker.py \
-  --bootstrap localhost:29092 \
-  --topic day4_orders \
-  --group day4_recovery_group \
-  --max-messages 100
+awk -F',' 'NR>1 {diff=$2-$3; print diff "," $0}' producer_throughput.csv | sort -t',' -k1,1nr | head -5
 
-python consumer_worker.py \
-  --bootstrap localhost:29092 \
-  --topic day4_orders \
-  --group day4_analytics \
-  --max-messages 150
