@@ -4,3 +4,9 @@ python produce_events.py \
   --file ../Data/retail_order_events.jsonl \
   --start 0 \
   --limit 100
+
+python consumer_worker.py \
+  --bootstrap localhost:29092 \
+  --topic day4_orders \
+  --group day4_recovery_group \
+  --max-messages 100
