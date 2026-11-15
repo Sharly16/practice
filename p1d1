@@ -10,3 +10,9 @@ python consumer_worker.py \
   --topic day4_orders \
   --group day4_recovery_group \
   --max-messages 100
+
+python consumer_worker.py \
+  --bootstrap localhost:29092 \
+  --topic day4_orders \
+  --group day4_analytics \
+  --max-messages 150
