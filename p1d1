@@ -1,2 +1,4 @@
 grep -nE "connection|CONNECTION|EventHub|EVENT|credential|namespace" src/producer.py
 sed -n '1,13p' src/producer.py
+
+Get-ChildItem -Path /home/niit -Recurse -File -ErrorAction SilentlyContinue | Select-String -Pattern "producer-policy","practice123.servicebus.windows.net" | Select-Object Path,LineNumber,Line
