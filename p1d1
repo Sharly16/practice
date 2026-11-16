@@ -1,6 +1,3 @@
-docker inspect day4-kafka-broker --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -E 'LISTENER|ADVERTISED'
-
-docker exec day4-kafka-broker /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list | grep sharlypricilla
 
 import json
 from kafka import KafkaConsumer
