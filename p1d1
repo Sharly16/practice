@@ -1,33 +1,70 @@
+"""
+===============================================================================
+Kafka Lab: Kafka Consumer Offsets Check
+File: student_workspace/consumer.py
+===============================================================================
+"""
 
 import json
+import os
+import sys
 from kafka import KafkaConsumer
 
-TOPIC = "events-stream-sharlypricilla-albertwilson-p1d4"
-GROUP_ID = "alerts-group-sharlypricilla-albertwilson-p1d4"
-
-consumer = KafkaConsumer(
-    TOPIC,
-    bootstrap_servers="localhost:29092",
-    group_id=GROUP_ID,
-    auto_offset_reset="earliest",
-    enable_auto_commit=False,
-    value_deserializer=lambda x: json.loads(x.decode("utf-8")),
-    consumer_timeout_ms=10000
+BOOTSTRAP_SERVERS = os.getenv(
+    "KAFKA_BOOTSTRAP_SERVERS",
+    "localhost:29092"
 )
 
-count = 0
+GROUP_ID = "alerts-group-sharlypricilla-albertwilson-p1d4"
+TOPIC_NAME = "events-stream-sharlypricilla-albertwilson-p1d4"
 
-for message in consumer:
-    print(
-        f"Consumed partition={message.partition} "
-        f"offset={message.offset} value={message.value}"
+
+def run_consumer():
+    """
+    Connect to Kafka as part of GROUP_ID, consume messages from TOPIC_NAME,
+    and commit offsets.
+    """
+
+    print("[INFO] Initializing Kafka Consumer...")
+    print(f"[INFO] Consumer Group: {GROUP_ID}")
+    print(f"[INFO] Subscribing to Topic: {TOPIC_NAME}")
+
+    consumer = KafkaConsumer(
+        TOPIC_NAME,
+        bootstrap_servers=BOOTSTRAP_SERVERS,
+        group_id=GROUP_ID,
+        auto_offset_reset="earliest",
+        enable_auto_commit=False,
+        value_deserializer=lambda value: json.loads(
+            value.decode("utf-8")
+        ),
+        consumer_timeout_ms=5000
     )
-    count += 1
 
-if count > 0:
-    consumer.commit()
-    print(f"Committed offsets after consuming {count} records")
-else:
-    print("No records available to consume")
+    consumed_count = 0
 
-consumer.close()
+    for message in consumer:
+        print(
+            f"[INFO] Consumed: "
+            f"topic={message.topic}, "
+            f"partition={message.partition}, "
+            f"offset={message.offset}, "
+            f"value={message.value}"
+        )
+        consumed_count += 1
+
+    if consumed_count > 0:
+        consumer.commit()
+        print(
+            f"[INFO] Successfully committed offsets "
+            f"after consuming {consumed_count} message(s)."
+        )
+    else:
+        print("[INFO] No new messages available.")
+
+    consumer.close()
+    print("[INFO] Kafka consumer closed.")
+
+
+if __name__ == "__main__":
+    run_consumer()
