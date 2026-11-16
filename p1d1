@@ -1,11 +1,6 @@
-
-
-find ~/Downloads -type f \( \
--name "sales_initial.csv" -o \
--name "sales_updates.csv" -o \
--name "products.csv" -o \
--name "D2_1_Delta_Retail_Pipeline.py" -o \
--name "D2_2_Job_Failure_Repair.py" -o \
--name "D2_3_Operations_Triage_and_Query_Plans.py" -o \
--name "Day2_Operations_Evidence.xlsx" \
-\) 2>/dev/null
+CREATE WAREHOUSE DEV_WH_LTMIRUN25_P1D3
+WAREHOUSE_TYPE = 'STANDARD'
+WAREHOUSE_SIZE = 'X-SMALL'
+AUTO_SUSPEND = 300
+AUTO_RESUME = TRUE
+MAX_CLUSTER_COUNT = 1;
