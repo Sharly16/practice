@@ -1,3 +1,36 @@
 docker inspect day4-kafka-broker --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -E 'LISTENER|ADVERTISED'
 
 docker exec day4-kafka-broker /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list | grep sharlypricilla
+
+import json
+from kafka import KafkaConsumer
+
+TOPIC = "events-stream-sharlypricilla-albertwilson-p1d4"
+GROUP_ID = "alerts-group-sharlypricilla-albertwilson-p1d4"
+
+consumer = KafkaConsumer(
+    TOPIC,
+    bootstrap_servers="localhost:29092",
+    group_id=GROUP_ID,
+    auto_offset_reset="earliest",
+    enable_auto_commit=False,
+    value_deserializer=lambda x: json.loads(x.decode("utf-8")),
+    consumer_timeout_ms=10000
+)
+
+count = 0
+
+for message in consumer:
+    print(
+        f"Consumed partition={message.partition} "
+        f"offset={message.offset} value={message.value}"
+    )
+    count += 1
+
+if count > 0:
+    consumer.commit()
+    print(f"Committed offsets after consuming {count} records")
+else:
+    print("No records available to consume")
+
+consumer.close()
