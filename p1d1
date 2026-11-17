@@ -4,7 +4,7 @@ from airflow import DAG
 from airflow.providers.standard.operators.bash import BashOperator
 
 
-DAG_ID = "sharlypricilla-albertwilson-p1d4_bash_pwd_dag"
+DAG_ID = "sharlypricilla-albertwilson-p1d5_bash_pwd_dag"
 
 
 with DAG(
