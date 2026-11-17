@@ -1,30 +1,20 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from airflow import DAG
 from airflow.providers.standard.operators.bash import BashOperator
 
 
-def notify_failure(context):
-    task_instance = context.get("task_instance")
-    print(f"Task failure notification: {task_instance}")
-
-
-default_args = {
-    "retries": 2,
-    "retry_delay": timedelta(minutes=2),
-    "on_failure_callback": notify_failure,
-}
+DAG_ID = "sharlypricilla-albertwilson-p1d4_bash_pwd_dag"
 
 
 with DAG(
-    dag_id="sharlypricilla-albertwilson-p1d5_pipeline_retries_dag",
-    default_args=default_args,
+    dag_id=DAG_ID,
     schedule=None,
     start_date=datetime(2023, 1, 1),
     catchup=False,
 ) as dag:
 
-    pipeline_task = BashOperator(
-        task_id="pipeline_task",
-        bash_command="echo 'Pipeline retry configuration verified'",
+    bash_pwd_task = BashOperator(
+        task_id="bash_pwd_task",
+        bash_command="pwd",
     )
