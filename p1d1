@@ -1,9 +1,7 @@
 %sql
-CREATE TABLE ltmirun25_p1d6_optimize_table (
-    id INT,
-    event_type STRING,
-    user_id STRING,
-    event_time TIMESTAMP,
-    metric_val DOUBLE
-)
-USING DELTA;
+INSERT INTO ltmirun25_p1d6_optimize_table VALUES
+(1, 'login', 'user001', TIMESTAMP '2026-11-17 10:00:00', 10.5),
+(2, 'click', 'user002', TIMESTAMP '2026-11-17 10:05:00', 20.0),
+(3, 'purchase', 'user003', TIMESTAMP '2026-11-17 10:10:00', 99.5),
+(4, 'logout', 'user001', TIMESTAMP '2026-11-17 10:15:00', 5.0),
+(5, 'login', 'user004', TIMESTAMP '2026-11-17 10:20:00', 15.5);
