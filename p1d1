@@ -1,55 +1,39 @@
-%sql
+from datetime import datetime
 
-CREATE TABLE ltmirun25_p1d6_schema_evolution (
-    order_id INT,
-    customer_id STRING,
-    amount DOUBLE
+from airflow.decorators import dag, task
+
+
+@dag(
+    dag_id="sharlypricilla-albertwilson-p1d5_taskflow_dag",
+    schedule=None,
+    start_date=datetime(2023, 1, 1),
+    catchup=False,
 )
-USING DELTA;
+def taskflow_pipeline():
 
-%sql
+    @task
+    def extract_data():
+        return {
+            "order_id": 101,
+            "amount": 250
+        }
 
-INSERT INTO ltmirun25_p1d6_schema_evolution VALUES
-(1, 'C001', 500.0),
-(2, 'C002', 750.0),
-(3, 'C003', 1000.0);
+    @task
+    def transform_data(raw_data):
+        transformed_data = {
+            "order_id": raw_data["order_id"],
+            "amount": raw_data["amount"],
+            "status": "processed"
+        }
+        return transformed_data
 
-%sql
+    @task
+    def load_data(transformed_data):
+        print(f"Loaded data: {transformed_data}")
 
-SELECT *
-FROM ltmirun25_p1d6_schema_evolution;
-
-
-from pyspark.sql import Row
-
-new_data = [
-    Row(order_id=4, customer_id="C004", amount=1200.0, discount=10.0),
-    Row(order_id=5, customer_id="C005", amount=1500.0, discount=15.0)
-]
-
-df = spark.createDataFrame(new_data)
-
-df.write \
-    .format("delta") \
-    .mode("append") \
-    .option("mergeSchema", "true") \
-    .saveAsTable("ltmirun25_p1d6_schema_evolution")
+    raw = extract_data()
+    processed = transform_data(raw)
+    load_data(processed)
 
 
-
-%sql
-
-DESCRIBE TABLE ltmirun25_p1d6_schema_evolution;
-
-
-%sql
-
-SELECT *
-FROM ltmirun25_p1d6_schema_evolution
-ORDER BY order_id;
-
-
-
-%sql
-
-DESCRIBE HISTORY ltmirun25_p1d6_schema_evolution;
+dag_instance = taskflow_pipeline()
