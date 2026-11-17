@@ -1,0 +1,15 @@
+{
+	"name": "adf-day5-spaw-2004",
+	"properties": {
+		"trustModeClaimForMi": {
+			"value": "Disabled",
+			"editable": true
+		}
+	},
+	"location": "eastus",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "9f771b49-65a7-4bd7-a095-08e391cdcbfb",
+		"tenantId": "b004a8b0-87e2-43c3-9940-c62feee15ff9"
+	}
+}
