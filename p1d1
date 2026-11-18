@@ -1,39 +1,53 @@
-from datetime import datetime
+import json
+import os
+from kafka import KafkaProducer
 
-from airflow.decorators import dag, task
-
-
-@dag(
-    dag_id="sharlypricilla-albertwilson-p1d5_taskflow_dag",
-    schedule=None,
-    start_date=datetime(2023, 1, 1),
-    catchup=False,
+BOOTSTRAP_SERVERS = os.getenv(
+    "KAFKA_BOOTSTRAP_SERVERS",
+    "localhost:29092"
 )
-def taskflow_pipeline():
 
-    @task
-    def extract_data():
-        return {
-            "order_id": 101,
-            "amount": 250
+TOPIC_NAME = "events-stream-sharlypricilla-albertwilson-p1d4"
+
+
+def run_producer():
+    print(f"[INFO] Initializing Kafka Producer for topic: {TOPIC_NAME}")
+
+    producer = KafkaProducer(
+        bootstrap_servers=BOOTSTRAP_SERVERS,
+        value_serializer=lambda value: json.dumps(value).encode("utf-8")
+    )
+
+    alerts = [
+        {
+            "alert_id": "ALT-1001",
+            "event_type": "security_alert",
+            "severity": "HIGH",
+            "message": "Suspicious login activity detected"
+        },
+        {
+            "alert_id": "ALT-1002",
+            "event_type": "login_failure",
+            "severity": "MEDIUM",
+            "message": "Multiple failed login attempts detected"
+        },
+        {
+            "alert_id": "ALT-1003",
+            "event_type": "security_alert",
+            "severity": "LOW",
+            "message": "Unusual account activity detected"
         }
+    ]
 
-    @task
-    def transform_data(raw_data):
-        transformed_data = {
-            "order_id": raw_data["order_id"],
-            "amount": raw_data["amount"],
-            "status": "processed"
-        }
-        return transformed_data
+    for alert in alerts:
+        producer.send(TOPIC_NAME, value=alert)
+        print(f"[INFO] Published: {alert}")
 
-    @task
-    def load_data(transformed_data):
-        print(f"Loaded data: {transformed_data}")
+    producer.flush()
+    producer.close()
 
-    raw = extract_data()
-    processed = transform_data(raw)
-    load_data(processed)
+    print("[INFO] All security alerts published successfully.")
 
 
-dag_instance = taskflow_pipeline()
+if __name__ == "__main__":
+    run_producer()
