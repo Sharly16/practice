@@ -1,1 +1,19 @@
-docker exec -it kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:9092 --create --if-not-exists --topic bp-test --partitions 1 --replication-factor 3
+%sql
+CREATE CATALOG IF NOT EXISTS ut_ltm_ltmirun25_p1w01;
+
+CREATE SCHEMA IF NOT EXISTS ut_ltm_ltmirun25_p1w01.data;
+
+CREATE TABLE IF NOT EXISTS ut_ltm_ltmirun25_p1w01.data.sample_data (
+    id INT,
+    name STRING,
+    amount DOUBLE
+)
+USING DELTA;
+
+INSERT INTO ut_ltm_ltmirun25_p1w01.data.sample_data
+VALUES
+(1, 'A', 100.0),
+(2, 'B', 200.0),
+(3, 'C', 300.0);
+
+SELECT * FROM ut_ltm_ltmirun25_p1w01.data.sample_data;
