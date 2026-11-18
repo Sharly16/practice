@@ -17,3 +17,26 @@ VALUES
 (3, 'C', 300.0);
 
 SELECT * FROM ut_ltm_ltmirun25_p1w01.data.sample_data;
+
+display(dbutils.fs.ls(
+    "/Workspace/Users/ltmirun3@labskraft.com/day7 labs/Production Scenarios/"
+))
+
+
+dbutils.fs.cp(
+    "file:/Workspace/Users/ltmirun3@labskraft.com/day7 labs/Production Scenarios/capstone_orders.csv",
+    "/Volumes/databricks_operations_training/capstone_user03/day7_data/capstone_orders.csv"
+)
+
+dbutils.fs.cp(
+    "file:/Workspace/Users/ltmirun3@labskraft.com/day7 labs/Production Scenarios/capstone_products.csv",
+    "/Volumes/databricks_operations_training/capstone_user03/day7_data/capstone_products.csv"
+)
+
+
+display(dbutils.fs.ls(
+    "/Volumes/databricks_operations_training/capstone_user03/day7_data/"
+))
+
+
+
