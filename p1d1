@@ -1,42 +1,217 @@
-%sql
-CREATE CATALOG IF NOT EXISTS ut_ltm_ltmirun25_p1w01;
 
-CREATE SCHEMA IF NOT EXISTS ut_ltm_ltmirun25_p1w01.data;
+Observability Lab: Dynatrace Grail & DQL Event Querying
+1. Objective & Grail Lakehouse Overview
+Dynatrace Grail is a schema-on-read data lakehouse designed to store and analyze observability data such as logs, metrics, events, and traces at scale.
 
-CREATE TABLE IF NOT EXISTS ut_ltm_ltmirun25_p1w01.data.sample_data (
-    id INT,
-    name STRING,
-    amount DOUBLE
-)
-USING DELTA;
+Dynatrace Query Language (DQL) uses pipeline-based processing. Commands are connected using the pipe (|) operator. In this analysis:
 
-INSERT INTO ut_ltm_ltmirun25_p1w01.data.sample_data
-VALUES
-(1, 'A', 100.0),
-(2, 'B', 200.0),
-(3, 'C', 300.0);
+fetch retrieves log records.
+filter isolates required events.
+summarize aggregates matching records.
+sort orders the results for easier analysis.
+The supplied Grail dataset contains 8 log records.
 
-SELECT * FROM ut_ltm_ltmirun25_p1w01.data.sample_data;
+2. Formulating DQL Queries (fetch, filter, summarize, sort)
+A. Filter Error Logs by Service
+DQL Statement:
+fetch logs
+| filter status == "ERROR"
+| summarize error_count = count(), by:{service.name, host.name}
+| sort error_count desc
+Observed Results:
+Service Name	Host Name	Error Count
+order-service	k8s-worker-node-02	3
+payment-service	k8s-worker-node-03	1
+Finding: There are 4 ERROR events in total. Three of the four ERROR events occur in order-service on k8s-worker-node-02, representing 75% of all ERROR events.
 
-display(dbutils.fs.ls(
-    "/Workspace/Users/ltmirun3@labskraft.com/day7 labs/Production Scenarios/"
-))
+B. Grouping by Event Type & Time Bins
+DQL Statement:
+fetch logs
+| filter status == "ERROR" or status == "WARN"
+| summarize total_occurrences = count(), by:{event.type}
+| sort total_occurrences desc
+Event Breakdown:
+Event Type	Total Occurrences
+app_crash	3
+network_timeout	1
+performance_warning	1
+retry	1
+The remaining two records are INFO/audit events.
 
+Time Window Analysis
+fetch logs
+| filter status == "ERROR"
+| summarize error_count = count(), by:{bin(timestamp, 2m)}
+| sort timestamp asc
+Observed ERROR timestamps:
 
-dbutils.fs.cp(
-    "file:/Workspace/Users/ltmirun3@labskraft.com/day7 labs/Production Scenarios/capstone_orders.csv",
-    "/Volumes/databricks_operations_training/capstone_user03/day7_data/capstone_orders.csv"
-)
+11:01:20 – order-service application crash
+11:03:05 – order-service application crash
+11:04:12 – payment-service network timeout
+11:06:40 – order-service application crash
+This shows repeated failures throughout the observed time period rather than a single isolated error.
 
-dbutils.fs.cp(
-    "file:/Workspace/Users/ltmirun3@labskraft.com/day7 labs/Production Scenarios/capstone_products.csv",
-    "/Volumes/databricks_operations_training/capstone_user03/day7_data/capstone_products.csv"
-)
+3. Crash Pattern Diagnosis & Host Attribute Correlation
+1. Which host and service accounted for 75% of all ERROR events?
+Failing Host: k8s-worker-node-02
+Failing Service: order-service
+Error Types Logged: app_crash
+ERROR Count: 3
+Percentage of ERROR Events: 75%
+Three of the four ERROR records belong to order-service running on k8s-worker-node-02. This makes that service/host combination the primary application-crash hotspot.
 
+DQL Query
+fetch logs
+| filter status == "ERROR"
+| summarize error_count = count(), by:{host.name, service.name, event.type}
+| sort error_count desc
+2. What specific root-cause exceptions are captured in the log content?
+Exception 1: DatabaseConnectionTimeout: Connection pool exhausted [active=50, max=50]
+Exception 2: NullPointerException: OrderPayloadValidator.validate
+Exception 3: OutOfMemoryError: Metaspace limit exceeded
+All three exceptions are associated with:
 
-display(dbutils.fs.ls(
-    "/Volumes/databricks_operations_training/capstone_user03/day7_data/"
-))
+Service: order-service
+Host: k8s-worker-node-02
+Event Type: app_crash
+DQL Query for Application Crashes
+fetch logs
+| filter event.type == "app_crash"
+| fields timestamp, host.name, service.name, content
+| sort timestamp asc
+Crash Pattern Finding
+order-service experienced three different application failure patterns on the same Kubernetes worker node:
+
+Database connection pool exhaustion.
+Null pointer exception during order payload validation.
+JVM Metaspace exhaustion.
+Because all three application crashes occur on k8s-worker-node-02, investigation should prioritize the order-service workload and resources running on that worker.
+
+Additional Service Findings
+Payment Service
+payment-service on k8s-worker-node-03 recorded:
+
+SocketTimeout: Stripe gateway read timed out after 5000ms
+Event type:
+
+network_timeout
+A later warning reported:
+
+Retry 2 of 3 triggered for credit card validation
+This indicates that the payment flow encountered an external/network timeout and subsequently entered retry processing.
+
+Inventory Service
+inventory-service on k8s-worker-node-01 recorded:
+
+Slow response from cache server: 1420ms
+Status:
+
+WARN
+Event type:
+
+performance_warning
+This indicates degraded cache response performance but not an application crash.
+
+Authentication Service
+auth-service on k8s-worker-node-01 produced two INFO/audit records:
+
+Token validated for user usr_4910
+Session refreshed for user usr_8812
+These are informational audit events and do not represent application failures.
+
+Severity Summary
+DQL Statement
+fetch logs
+| summarize event_count = count(), by:{status}
+| sort event_count desc
+Observed Results
+Status	Count
+ERROR	4
+WARN	2
+INFO	2
+Total	8
+Host-Level Summary
+DQL Statement
+fetch logs
+| summarize event_count = count(), by:{host.name, status}
+| sort host.name asc
+Observed Host Distribution
+k8s-worker-node-01
+
+2 INFO events from auth-service
+1 WARN event from inventory-service
+k8s-worker-node-02
+
+3 ERROR events from order-service
+k8s-worker-node-03
+
+1 ERROR event from payment-service
+1 WARN event from payment-service
+The most significant host is k8s-worker-node-02 because all events recorded for that worker in this dataset are order-service application crashes.
+
+4. Operational Recommendations
+DQL Alerting Rules
+Configure alerting for repeated app_crash events, particularly when multiple crashes occur for the same service and host within a short time window.
+
+Example DQL:
+
+fetch logs
+| filter status == "ERROR"
+| filter event.type == "app_crash"
+| summarize crash_count = count(), by:{service.name, host.name}
+| filter crash_count >= 3
+| sort crash_count desc
+For the supplied dataset, this rule would identify:
+
+order-service
+k8s-worker-node-02
+3 application crashes
+Order Service
+Investigate:
+
+Database connection pool capacity because the pool reached active=50, max=50.
+OrderPayloadValidator.validate for the NullPointerException.
+JVM Metaspace utilization and class-loading behavior because of OutOfMemoryError: Metaspace limit exceeded.
+Kubernetes pod/container resource limits and restart patterns for order-service.
+Node-level health and resource pressure on k8s-worker-node-02.
+Payment Service
+Investigate:
+
+Stripe gateway/network connectivity.
+The 5000 ms timeout threshold.
+Retry behavior because Retry 2 of 3 was triggered.
+Downstream payment dependency latency and availability.
+Inventory Service
+Investigate cache latency because a response time of 1420ms generated a performance warning.
+
+Grail Retention Strategy
+Retain ERROR and application-crash logs for a longer period than routine informational logs so historical failure patterns and recurring service problems can be investigated.
+
+A practical operational approach is:
+
+Keep ERROR and crash records available for long-term incident and root-cause analysis.
+Retain WARN records long enough for performance trend analysis.
+Use shorter retention for routine INFO/audit records when organizational compliance requirements allow it.
+Use Grail filtering and aggregation to reduce noise while preserving failure evidence.
+Final Findings
+The dataset contains 8 log records:
+
+4 ERROR
+2 WARN
+2 INFO
+The main reliability concern is order-service on k8s-worker-node-02.
+
+The service generated 3 application crashes, representing 75% of all ERROR events.
+
+The three observed root-cause exception patterns were:
+
+DatabaseConnectionTimeout: Connection pool exhausted [active=50, max=50]
+NullPointerException: OrderPayloadValidator.validate
+OutOfMemoryError: Metaspace limit exceeded
+A separate payment-service incident on k8s-worker-node-03 shows a Stripe gateway timeout followed by retry activity.
+
+The analysis demonstrates DQL-style use of fetch, filter, summarize, and sort to isolate failures, aggregate log events, correlate services with Kubernetes worker nodes, analyze events across time windows, and identify the primary application-crash pattern.
+
 
 
 
