@@ -1,3 +1,11 @@
+shopt -s dotglob
+mv rtel_dynatrace_dql_queries/* . 2>/dev/null
+shopt -u dotglob
+
+rmdir rtel_dynatrace_dql_queries
+
+find . -maxdepth 2 -type f
+
 
 Observability Lab: Dynatrace Grail & DQL Event Querying
 1. Objective & Grail Lakehouse Overview
