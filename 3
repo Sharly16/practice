@@ -1,0 +1,159 @@
+# Observability Lab: Distributed Trace Waterfall & Root Span Analysis
+
+## 1. Transaction Overview & Architecture Context
+
+The distributed transaction represents an order-placement request across multiple microservices.
+
+- Request Method: POST
+- Request Endpoint: /api/v2/orders
+- Client ID: cust_882194
+- Trace ID: tr-7b94e18f2c3a50d6
+- Root Span ID: span-gw-01
+- Total Transaction Duration: 5420 ms
+- Total Spans: 8
+- Transaction Outcome: HTTP 504 Gateway Timeout
+- Timestamp: 2026-11-14T15:10:04.120Z
+
+Services involved in the distributed transaction:
+
+- api-gateway
+- order-service
+- auth-service
+- inventory-service
+- pricing-service
+- payment-service
+- payment-db
+
+The request entered through the API Gateway and was passed to the order-service. The order-service successfully completed authentication, inventory reservation, and pricing operations before calling the payment-service.
+
+The payment-service then called the external payment provider. The external authorization call timed out, causing the payment operation to fail. The failure propagated back through the order-service and API Gateway, resulting in an HTTP 504 Gateway Timeout.
+
+---
+
+## 2. Distributed Trace Waterfall Span Breakdown
+
+| Span ID | Parent Span ID | Service Name | Operation / Method Name | Duration (ms) | Self Time (ms) | % of Total Latency | Span Status |
+|---|---|---|---|---:|---:|---:|---|
+| span-gw-01 | None | api-gateway | HTTP POST /api/v2/orders | 5420 | 10 | 100.00% | ERROR |
+| span-ord-02 | span-gw-01 | order-service | OrderController.createOrder | 5410 | 111 | 99.82% | ERROR |
+| span-auth-03 | span-ord-02 | auth-service | TokenService.validateSession | 18 | 18 | 0.33% | OK |
+| span-inv-04 | span-ord-02 | inventory-service | InventoryClient.reserveStock | 42 | 42 | 0.77% | OK |
+| span-price-05 | span-ord-02 | pricing-service | PricingEngine.computeTotal | 34 | 34 | 0.63% | OK |
+| span-pay-06 | span-ord-02 | payment-service | PaymentProcessor.chargeCustomer | 5285 | 140 | 97.51% | ERROR |
+| span-ext-07 | span-pay-06 | payment-service | ExternalPaymentGateway.authorizeCard | 5120 | 5120 | 94.46% | ERROR |
+| span-db-08 | span-pay-06 | payment-db | PaymentRepository.recordTransactionFailure | 25 | 25 | 0.46% | OK |
+
+### Explain Distributed Tracing Concepts
+
+### 1. Root Span vs. Child Span
+
+The root span represents the complete end-to-end request as observed by the entry-point service.
+
+In this transaction, the root span is:
+
+- Span ID: span-gw-01
+- Service: api-gateway
+- Operation: HTTP POST /api/v2/orders
+- Duration: 5420 ms
+
+The root span has no parent because the API Gateway is the first instrumented component receiving the request.
+
+Child spans represent downstream operations that occur as part of the root transaction.
+
+For example:
+
+span-gw-01  
+→ span-ord-02  
+→ span-pay-06  
+→ span-ext-07
+
+Other child spans under order-service include:
+
+- span-auth-03
+- span-inv-04
+- span-price-05
+
+The payment database operation span-db-08 is a child of span-pay-06.
+
+The parent-child relationships allow distributed tracing to reconstruct the complete call tree and show exactly where time was spent across service boundaries.
+
+### 2. Total Duration vs. Self Time
+
+Total span duration includes both the service's own processing time and time spent waiting for child operations.
+
+Self time represents the amount of time actually spent inside that span excluding child-span execution.
+
+This difference is important for finding the true bottleneck.
+
+For example:
+
+api-gateway:
+
+- Total duration: 5420 ms
+- Self time: 10 ms
+
+Although the gateway span lasts for the full 5420 ms, the gateway itself performs only about 10 ms of work. Most of the gateway duration comes from waiting for downstream services.
+
+order-service:
+
+- Total duration: 5410 ms
+- Self time: 111 ms
+
+The order-service is not itself consuming 5.4 seconds of processing time. Its long duration is mainly caused by waiting on downstream payment processing.
+
+payment-service:
+
+- Total duration: 5285 ms
+- Self time: 140 ms
+
+Again, the payment-service itself performs only 140 ms of local work. Most of its total duration is caused by the external gateway call.
+
+ExternalPaymentGateway.authorizeCard:
+
+- Total duration: 5120 ms
+- Self time: 5120 ms
+
+This span has no slow child span underneath it. Therefore, the entire 5120 ms is spent in the external payment authorization operation itself.
+
+This makes span-ext-07 the true bottleneck.
+
+### 3. Trace Context Propagation
+
+The Trace ID remains constant across the complete distributed request:
+
+tr-7b94e18f2c3a50d6
+
+Each operation receives its own unique Span ID while preserving the common Trace ID.
+
+The Parent Span ID identifies which operation called the current span.
+
+A typical propagation path is:
+
+Client  
+→ API Gateway  
+→ Order Service  
+→ Payment Service  
+→ External Payment Provider
+
+HTTP tracing headers such as W3C `traceparent` allow the Trace ID and parent-span context to propagate across service and network boundaries.
+
+Each downstream service creates a new child span while maintaining the shared Trace ID.
+
+This allows observability platforms to reconstruct the complete distributed transaction even when the request crosses several independent services.
+
+---
+
+## 3. Trace-to-Log Correlation Analysis
+
+Correlation key:
+
+Trace ID: tr-7b94e18f2c3a50d6
+
+| Timestamp (UTC) | Service Name | Span ID | Log Level | Key Message / Exception Summary |
+|---|---|---|---|---|
+| 15:10:04.122Z | api-gateway | span-gw-01 | INFO | Incoming POST /api/v2/orders request routed to order-service |
+| 15:10:04.135Z | auth-service | span-auth-03 | INFO | JWT token successfully validated for cust_882194 |
+| 15:10:04.180Z | inventory-service | span-inv-04 | INFO | Stock reservation res_55102 confirmed for order ord_994182 |
+| 15:10:04.242Z | payment-service | span-pay-06 | INFO | Authorization initiated for $149.99 with external payment provider |
+| 15:10:09.255Z | payment-service | span-ext-07 | ERROR | External authorization failed with java.net.SocketTimeoutException |
+| 15:10:09.380Z | order-service | span-ord-02
