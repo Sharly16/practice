@@ -1,208 +1,149 @@
 # Observability Lab: Datadog APM & Service Map Flow Investigation
 
-## 1. Investigation Summary & Topology Context
-<!-- Briefly summarize the Datadog incident, the service triggering the alert, and overall transaction flow. -->
+## 1\. Investigation Summary & Topology Context
 
+The Datadog investigation identified a production performance degradation centered on payment\-api. The service showed a **14.2% error rate** and **4850 ms P95 latency**.
+
+The overall transaction flow was:
+
+web\-storefront → checkout\-service → payment\-api → postgres\-payment\-db
+
+The payment\-api also communicated with the external stripe\-external\-gateway.
+
+Analysis of the Datadog Service Map and APM trace showed that the main bottleneck was PostgreSQL database lock contention. A SELECT ... FOR UPDATE query waited approximately 5 seconds and timed out. This caused HTTP 500 failures in payment\-api, which propagated upstream to checkout\-service and affected the web\-storefront.
 
 ---
 
-## 2. Datadog Service Map Dependency Analysis
-
-Complete the service map dependency table based on `datadog_apm_servicemap.json`:
+## 2\. Datadog Service Map Dependency Analysis
 
 | Service Name | Service Type / Engine | Throughput (RPM) | Error Rate (%) | Latency P95 (ms) | Status |
-|---|---|---|---|---|---|
-| `web-storefront` | | | | | |
-| `checkout-service` | | | | | |
-| `payment-api` | | | | | |
-| `postgres-payment-db` | | | | | |
-| `stripe-external-gateway` | | | | | |
+| --- | --- | --- | --- | --- | --- |
+| web\-storefront | Web / Node.js | 12000 | 3.8 | 520 | WARNING |
+| checkout\-service | API / Java | 4500 | 9.4 | 2800 | DEGRADED |
+| payment\-api | API / Python FastAPI | 1800 | 14.2 | 4850 | CRITICAL |
+| postgres\-payment\-db | Database / PostgreSQL 15.3 | N/A | 18.0 on the payment\-api → database dependency | N/A | CRITICAL |
+| stripe\-external\-gateway | Third\-party | 1600 | 0.2 | 110 | HEALTHY |
 
-### Service Map Dependency Traversal:
-- **Upstream Callers of `payment-api`:**
-- **Downstream Dependencies of `payment-api`:**
-- **Propagation of Error Rates:** Explain how database errors in `postgres-payment-db` cascade upward through `payment-api` into `checkout-service`:
+### Service Map Dependency Traversal
 
----
-
-## 3. APM Trace & Flame Graph Breakdown
-
-Analyze the APM flame graph trace (`trace_id: dd-88491029141`) to inspect span execution times:
-
-| Span ID | Service Name | Resource / SQL Statement | Start (ms) | Duration (ms) | % of Trace Latency | Error Flag (0 / 1) |
-|---|---|---|---|---|---|---|
-| `span-dd-01` | | | | | | |
-| `span-dd-02` | | | | | | |
-| `span-dd-03` | | | | | | |
-| `span-dd-04` | | | | | | |
+- **Upstream Callers of** **payment\-api****:** checkout\-service, with web\-storefront further upstream through checkout\-service.
+- **Downstream Dependencies of** **payment\-api****:** postgres\-payment\-db and stripe\-external\-gateway.
+- **Propagation of Error Rates:** The payment\-api → postgres\-payment\-db dependency showed an **18.0% error rate**. Database lock contention caused payment requests to time out, contributing to the **14.2% error rate** in payment\-api. These failures propagated upstream to checkout\-service, which showed a **9.4% error rate**, and ultimately affected web\-storefront, which showed a **3.8% error rate** and WARNING status.
 
 ---
 
-## 4. Root Cause & Database Bottleneck Diagnosis
+## 3\. APM Trace & Flame Graph Breakdown
 
-Answer the following diagnostic questions based on your findings:
+Trace ID: dd\-88491029141
 
-1. **Which specific database query is responsible for 97%+ of the total request latency?**
-   - *SQL Statement:*
-   - *Duration (ms):*
-   - *Error Type & Message:*
+Total Trace Duration: **5120 ms**
 
-2. **Why is the database query blocking (refer to connection count and lock wait queue)?**
-   - *PostgreSQL Connection Pool Status:*
-   - *Row Lock Contention (`FOR UPDATE` clause impact):*
+| Span ID | Service Name | Resource / SQL Statement | Start (ms) | Duration (ms) | % of Trace Latency | Error Flag |
+| --- | --- | --- | --- | --- | --- | --- |
+| span\-dd\-01 | payment\-api | POST /api/v1/payments/process | 0 | 5120 | 100% | 1 |
+| span\-dd\-02 | payment\-api | validate\_customer\_wallet | 5 | 25 | 0.49% | 0 |
+| span\-dd\-03 | payment\-api | SELECT \* FROM payment\_accounts WHERE account\_id = ? FOR UPDATE | 32 | 5008 | 97.81% | 1 |
+| span\-dd\-04 | payment\-api | stripe\_external\_authorize | 5045 | 70 | 1.37% | 0 |
 
-3. **Did the external Stripe payment gateway contribute to this outage? Cite its latency and error rate:**
-   - *Stripe Latency:*
-   - *Stripe Error Rate:*
-   - *Conclusion:*
+The flame graph clearly identifies span\-dd\-03 as the dominant operation, consuming approximately **97.81%** of the complete payment request duration.
 
 ---
 
-## 5. Architectural Remediation & Observability Recommendations
-<!-- Provide 3 concrete engineering fixes (e.g., query optimization, non-blocking locks, connection pooling, Datadog monitor threshold alerts). -->
+## 4\. Root Cause & Database Bottleneck Diagnosis
 
+### 1\. Which specific database query is responsible for 97%\+ of the total request latency?
 
+- **SQL Statement:** SELECT \* FROM payment\_accounts WHERE account\_id = ? FOR UPDATE
+- **Duration:** 5008 ms
+- **Error Type:** psycopg2.errors.QueryCanceled
+- **Error Message:** canceling statement due to statement timeout (5000ms)
 
-{
-  "question_code": "RTEL_Q05_E",
-  "problem_code": "rtel_datadog_apm_servicemap",
-  "exam_code": "p1d9"
-}
+The SQL query consumed approximately **97.81%** of the complete 5120 ms trace duration.
 
+### 2\. Why is the database query blocking?
 
-{
-  "investigation_metadata": {
-    "platform": "Datadog APM & Distributed Tracing",
-    "service_name": "payment-api",
-    "environment": "production",
-    "time_window": "Last 15 minutes",
-    "investigation_focus": "Elevated error rate (14.2%) and P99 latency spike (4,850ms)"
-  },
-  "service_map": {
-    "description": "Datadog automated topology map representing upstream and downstream service dependencies.",
-    "nodes": [
-      {
-        "service": "web-storefront",
-        "type": "web",
-        "language": "nodejs",
-        "rpm": 12000,
-        "error_rate_percent": 3.8,
-        "latency_p95_ms": 520,
-        "status": "WARNING"
-      },
-      {
-        "service": "checkout-service",
-        "type": "api",
-        "language": "java",
-        "rpm": 4500,
-        "error_rate_percent": 9.4,
-        "latency_p95_ms": 2800,
-        "status": "DEGRADED"
-      },
-      {
-        "service": "payment-api",
-        "type": "api",
-        "language": "python-fastapi",
-        "rpm": 1800,
-        "error_rate_percent": 14.2,
-        "latency_p95_ms": 4850,
-        "status": "CRITICAL"
-      },
-      {
-        "service": "postgres-payment-db",
-        "type": "database",
-        "engine": "PostgreSQL 15.3",
-        "active_connections": 98,
-        "max_connections": 100,
-        "lock_wait_queue": 34,
-        "status": "CRITICAL"
-      },
-      {
-        "service": "stripe-external-gateway",
-        "type": "third-party",
-        "rpm": 1600,
-        "error_rate_percent": 0.2,
-        "latency_p95_ms": 110,
-        "status": "HEALTHY"
-      }
-    ],
-    "edges": [
-      {
-        "from": "web-storefront",
-        "to": "checkout-service",
-        "call_rate_rpm": 4500,
-        "error_percent": 9.4
-      },
-      {
-        "from": "checkout-service",
-        "to": "payment-api",
-        "call_rate_rpm": 1800,
-        "error_percent": 14.2
-      },
-      {
-        "from": "payment-api",
-        "to": "postgres-payment-db",
-        "call_rate_rpm": 3600,
-        "error_percent": 18.0
-      },
-      {
-        "from": "payment-api",
-        "to": "stripe-external-gateway",
-        "call_rate_rpm": 1600,
-        "error_percent": 0.2
-      }
-    ]
-  },
-  "apm_flame_graph": {
-    "trace_id": "dd-88491029141",
-    "root_resource": "POST /api/v1/payments/process",
-    "total_duration_ms": 5120,
-    "http_status_code": 500,
-    "error_message": "QueryTimeout: Lock wait timeout exceeded; try restarting transaction",
-    "spans": [
-      {
-        "span_id": "span-dd-01",
-        "service": "payment-api",
-        "resource": "POST /api/v1/payments/process",
-        "operation": "fastapi.request",
-        "start_ms": 0,
-        "duration_ms": 5120,
-        "error": 1
-      },
-      {
-        "span_id": "span-dd-02",
-        "service": "payment-api",
-        "resource": "validate_customer_wallet",
-        "operation": "function.call",
-        "start_ms": 5,
-        "duration_ms": 25,
-        "error": 0
-      },
-      {
-        "span_id": "span-dd-03",
-        "service": "payment-api",
-        "resource": "SELECT * FROM payment_accounts WHERE account_id = ? FOR UPDATE",
-        "operation": "postgres.query",
-        "start_ms": 32,
-        "duration_ms": 5008,
-        "error": 1,
-        "meta": {
-          "db.system": "postgresql",
-          "db.name": "payments_prod",
-          "db.statement": "SELECT * FROM payment_accounts WHERE account_id = ? FOR UPDATE",
-          "error.type": "psycopg2.errors.QueryCanceled",
-          "error.msg": "canceling statement due to statement timeout (5000ms)"
-        }
-      },
-      {
-        "span_id": "span-dd-04",
-        "service": "payment-api",
-        "resource": "stripe_external_authorize",
-        "operation": "http.client",
-        "start_ms": 5045,
-        "duration_ms": 70,
-        "error": 0
-      }
-    ]
-  }
-}
+- **PostgreSQL Connection Pool Status:** 98 active connections / 100 maximum connections, which represents approximately **98% connection utilization**. The database also had a **lock wait queue of 34**.
+- **Row Lock Contention (****FOR UPDATE** **clause impact):** The FOR UPDATE clause attempts to lock the selected payment\-account row so concurrent transactions cannot modify it simultaneously. When multiple payment requests access the same locked account record, subsequent transactions must wait for the existing lock to be released. The high database concurrency combined with 34 waiting operations resulted in prolonged lock contention. The sampled query waited until the configured 5000 ms statement timeout was reached and was then canceled.
+
+### 3\. Did the external Stripe payment gateway contribute to this outage?
+
+- **Stripe Latency:** Service Map P95 latency = **110 ms**; sampled APM trace span = **70 ms**
+- **Stripe Error Rate:** **0.2%**
+- **Conclusion:** No. stripe\-external\-gateway was HEALTHY. The Stripe operation completed successfully in only 70 ms in the sampled trace, while the PostgreSQL query consumed 5008 ms and failed. Therefore, the external payment gateway was not the primary cause of the outage.
+
+---
+
+## 5\. Architectural Remediation & Observability Recommendations
+
+### 1\. Query Optimization & Lock Management
+
+**Recommendation:**
+
+Optimize the payment account query and reduce the amount of time database transactions hold row\-level locks.
+
+Instead of retrieving unnecessary columns using:
+
+SELECT \*
+
+retrieve only the columns required for payment processing and verify that account\_id is appropriately indexed.
+
+The application should keep transactions containing FOR UPDATE as short as possible and avoid performing long\-running work or external API calls while holding database locks.
+
+Where application semantics permit, PostgreSQL locking approaches such as FOR UPDATE NOWAIT or FOR UPDATE SKIP LOCKED can also be evaluated to prevent requests from waiting several seconds for locked rows.
+
+### 2\. PostgreSQL Connection Pool & Lock Monitoring
+
+**Recommendation:**
+
+Review the application's database connection\-pool configuration against PostgreSQL's max\_connections and expected payment concurrency.
+
+The incident showed **98 of 100 connections active**, leaving almost no connection headroom.
+
+Datadog monitors should track:
+
+- Active database connections
+- Connection utilization
+- Lock wait count
+- Database query duration
+- Statement timeouts
+- Payment API error rate
+- P95/P99 response latency
+
+A practical warning can be configured when connection utilization exceeds approximately **80%**, with a critical alert at approximately **90%**, together with an increasing lock\-wait queue.
+
+### 3\. Datadog APM Monitoring & Alerting
+
+**Recommendation:**
+
+Configure Datadog monitors and APM dashboards to detect abnormal payment behavior before it becomes a major outage.
+
+Monitoring should include:
+
+- payment\-api error rate above **5%**
+- Increasing P95/P99 payment latency
+- PostgreSQL connection utilization above **80–90%**
+- Increasing PostgreSQL lock\-wait queue
+- Queries approaching the **5000 ms** statement timeout
+- HTTP 5xx responses
+- Slow database APM spans
+
+Datadog distributed tracing should continue to be used to correlate web\-storefront, checkout\-service, payment\-api, PostgreSQL, and external payment dependencies.
+
+---
+
+## Root Cause Summary
+
+The root cause of the production degradation was **PostgreSQL row\-lock contention combined with very high database connection utilization**.
+
+The query:
+
+SELECT \* FROM payment\_accounts WHERE account\_id = ? FOR UPDATE
+
+spent **5008 ms** waiting and eventually failed with a PostgreSQL statement timeout. At the same time, the database had **98/100 active connections** and **34 operations in the lock wait queue**.
+
+The resulting database failures propagated through:
+
+postgres\-payment\-db → payment\-api → checkout\-service → web\-storefront
+
+The external Stripe gateway remained healthy and was not the source of the outage.
+
