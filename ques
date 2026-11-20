@@ -1,0 +1,319 @@
+{
+  "incident_metadata": {
+    "incident_id": "INC-84920",
+    "incident_name": "Production Checkout Latency Spike & HTTP 500 Outage",
+    "service_tier": "E-Commerce Checkout & Payment Platform",
+    "affected_service": "checkout-service",
+    "severity": "SEV-1",
+    "incident_start_utc": "2026-11-14T14:02:15Z",
+    "incident_resolved_utc": "2026-11-14T14:20:30Z",
+    "duration_minutes": 18.25,
+    "description": "Multi-signal telemetry snapshot captured across metrics, events, logs, and distributed traces during a cascading checkout outage."
+  },
+  "metrics": {
+    "description": "Aggregated numeric time-series measurements tracking system health, resource utilization, and throughput.",
+    "time_series": [
+      {
+        "timestamp_utc": "13:55:00Z",
+        "checkout_p99_latency_ms": 215,
+        "checkout_error_rate_percent": 0.12,
+        "checkout_requests_per_sec": 420,
+        "checkout_cpu_utilization_percent": 34.2,
+        "db_connection_pool_active": 14,
+        "db_connection_pool_max": 50,
+        "db_connection_wait_queue": 0
+      },
+      {
+        "timestamp_utc": "14:00:00Z",
+        "checkout_p99_latency_ms": 228,
+        "checkout_error_rate_percent": 0.15,
+        "checkout_requests_per_sec": 435,
+        "checkout_cpu_utilization_percent": 36.1,
+        "db_connection_pool_active": 16,
+        "db_connection_pool_max": 50,
+        "db_connection_wait_queue": 0
+      },
+      {
+        "timestamp_utc": "14:03:00Z",
+        "checkout_p99_latency_ms": 1450,
+        "checkout_error_rate_percent": 1.45,
+        "checkout_requests_per_sec": 440,
+        "checkout_cpu_utilization_percent": 39.5,
+        "db_connection_pool_active": 48,
+        "db_connection_pool_max": 50,
+        "db_connection_wait_queue": 8
+      },
+      {
+        "timestamp_utc": "14:06:00Z",
+        "checkout_p99_latency_ms": 5210,
+        "checkout_error_rate_percent": 14.80,
+        "checkout_requests_per_sec": 310,
+        "checkout_cpu_utilization_percent": 41.2,
+        "db_connection_pool_active": 50,
+        "db_connection_pool_max": 50,
+        "db_connection_wait_queue": 85
+      },
+      {
+        "timestamp_utc": "14:10:00Z",
+        "checkout_p99_latency_ms": 6450,
+        "checkout_error_rate_percent": 22.40,
+        "checkout_requests_per_sec": 260,
+        "checkout_cpu_utilization_percent": 38.0,
+        "db_connection_pool_active": 50,
+        "db_connection_pool_max": 50,
+        "db_connection_wait_queue": 154
+      },
+      {
+        "timestamp_utc": "14:15:00Z",
+        "checkout_p99_latency_ms": 6100,
+        "checkout_error_rate_percent": 19.80,
+        "checkout_requests_per_sec": 280,
+        "checkout_cpu_utilization_percent": 37.4,
+        "db_connection_pool_active": 50,
+        "db_connection_pool_max": 50,
+        "db_connection_wait_queue": 138
+      },
+      {
+        "timestamp_utc": "14:22:00Z",
+        "checkout_p99_latency_ms": 235,
+        "checkout_error_rate_percent": 0.18,
+        "checkout_requests_per_sec": 445,
+        "checkout_cpu_utilization_percent": 35.0,
+        "db_connection_pool_active": 18,
+        "db_connection_pool_max": 50,
+        "db_connection_wait_queue": 0
+      }
+    ]
+  },
+  "events": {
+    "description": "Discrete state changes, human actions, deployments, and automated operational occurrences with contextual metadata.",
+    "event_records": [
+      {
+        "event_id": "EVT-1001",
+        "timestamp_utc": "2026-11-14T14:01:30Z",
+        "event_type": "DEPLOYMENT_START",
+        "source": "ArgoCD / GitOps Pipeline",
+        "service": "checkout-service",
+        "details": {
+          "previous_version": "v2.4.0",
+          "target_version": "v2.4.1",
+          "git_commit": "a7b8c9d1",
+          "change_summary": "Added promotional loyalty discount calculator and seasonal voucher engine."
+        }
+      },
+      {
+        "event_id": "EVT-1002",
+        "timestamp_utc": "2026-11-14T14:02:15Z",
+        "event_type": "DEPLOYMENT_COMPLETED",
+        "source": "Kubernetes Cluster",
+        "service": "checkout-service",
+        "details": {
+          "status": "SUCCESSFUL_ROLLOUT",
+          "replica_count": 5,
+          "image": "registry.internal/checkout-service:v2.4.1"
+        }
+      },
+      {
+        "event_id": "EVT-1003",
+        "timestamp_utc": "2026-11-14T14:04:45Z",
+        "event_type": "ALERT_FIRING",
+        "source": "Prometheus AlertManager",
+        "service": "checkout-service",
+        "details": {
+          "alert_name": "CheckoutServiceHighLatencyP99",
+          "severity": "CRITICAL",
+          "threshold": "p99 > 3000ms for 2m",
+          "observed_value": "5210ms"
+        }
+      },
+      {
+        "event_id": "EVT-1004",
+        "timestamp_utc": "2026-11-14T14:05:10Z",
+        "event_type": "ALERT_FIRING",
+        "source": "Prometheus AlertManager",
+        "service": "checkout-service",
+        "details": {
+          "alert_name": "CheckoutServiceHighErrorRate",
+          "severity": "CRITICAL",
+          "threshold": "http_5xx_rate > 5% for 1m",
+          "observed_value": "14.80%"
+        }
+      },
+      {
+        "event_id": "EVT-1005",
+        "timestamp_utc": "2026-11-14T14:08:00Z",
+        "event_type": "AUTOSCALING_TRIGGERED",
+        "source": "HorizontalPodAutoscaler",
+        "service": "checkout-service",
+        "details": {
+          "previous_replicas": 5,
+          "new_replicas": 10,
+          "reason": "Request latency SLA degradation (did not alleviate DB connection pool exhaustion)"
+        }
+      },
+      {
+        "event_id": "EVT-1006",
+        "timestamp_utc": "2026-11-14T14:18:00Z",
+        "event_type": "ROLLBACK_INITIATED",
+        "source": "SRE Incident Commander",
+        "service": "checkout-service",
+        "details": {
+          "action": "Triggered automated GitOps rollback to stable release v2.4.0",
+          "reason": "Connection leak identified in v2.4.1 loyalty discount module"
+        }
+      },
+      {
+        "event_id": "EVT-1007",
+        "timestamp_utc": "2026-11-14T14:20:30Z",
+        "event_type": "ROLLBACK_COMPLETED",
+        "source": "ArgoCD / GitOps Pipeline",
+        "service": "checkout-service",
+        "details": {
+          "active_version": "v2.4.0",
+          "status": "ALL_PODS_HEALTHY",
+          "all_alerts_resolved": true
+        }
+      }
+    ]
+  },
+  "logs": {
+    "description": "Discrete textual timestamped records of program execution with severity levels, contextual attributes, and exception stack traces.",
+    "sample_log_records": [
+      {
+        "timestamp_utc": "2026-11-14T14:04:12.184Z",
+        "level": "WARN",
+        "service": "checkout-service",
+        "thread": "http-nio-8080-exec-14",
+        "trace_id": "tr-4a8b1c2d3e",
+        "client_ip": "198.51.100.45",
+        "message": "HikariCP pool [CheckoutDB-Pool] connection acquisition took 2840ms (> warning threshold 1000ms)"
+      },
+      {
+        "timestamp_utc": "2026-11-14T14:05:08.912Z",
+        "level": "ERROR",
+        "service": "checkout-service",
+        "thread": "http-nio-8080-exec-29",
+        "trace_id": "tr-9f8e7d6c5b",
+        "client_ip": "203.0.113.88",
+        "endpoint": "POST /api/v1/checkout",
+        "http_status": 500,
+        "message": "Request processing failed: Connection acquisition timed out",
+        "exception": {
+          "class": "java.sql.SQLTransientConnectionException",
+          "root_cause": "com.zaxxer.hikari.pool.HikariPool$PoolKey: Connection is not available, request timed out after 5000ms (total=50, active=50, idle=0, waiting=74)",
+          "originating_method": "com.store.checkout.service.LoyaltyDiscountService.applyPromotionalVoucher(LoyaltyDiscountService.java:114)",
+          "defect_detail": "Missing try-with-resources block; connection opened in calculateSeasonalDiscount() is never closed on promotional code match."
+        }
+      },
+      {
+        "timestamp_utc": "2026-11-14T14:06:45.330Z",
+        "level": "ERROR",
+        "service": "checkout-service",
+        "thread": "http-nio-8080-exec-41",
+        "trace_id": "tr-7c3d2e1f0a",
+        "client_ip": "192.0.2.140",
+        "endpoint": "POST /api/v1/checkout",
+        "http_status": 500,
+        "message": "Request failed due to downstream database timeout",
+        "exception": {
+          "class": "java.sql.SQLTransientConnectionException",
+          "root_cause": "Connection is not available, request timed out after 5000ms",
+          "originating_method": "com.store.checkout.service.LoyaltyDiscountService.applyPromotionalVoucher(LoyaltyDiscountService.java:114)"
+        }
+      }
+    ]
+  },
+  "traces": {
+    "description": "Distributed request execution paths capturing parent-child span waterfalls, service boundaries, and latency contributions.",
+    "sample_trace": {
+      "trace_id": "tr-9f8e7d6c5b",
+      "root_service": "api-gateway",
+      "http_method": "POST",
+      "request_path": "/api/v1/checkout",
+      "total_duration_ms": 5184,
+      "trace_status": "ERROR",
+      "http_status_code": 500,
+      "spans": [
+        {
+          "span_id": "span-001",
+          "parent_span_id": null,
+          "service_name": "api-gateway",
+          "operation_name": "HTTP POST /api/v1/checkout",
+          "start_offset_ms": 0,
+          "duration_ms": 5184,
+          "status": "ERROR",
+          "tags": {
+            "http.status_code": 500,
+            "component": "envoy-proxy"
+          }
+        },
+        {
+          "span_id": "span-002",
+          "parent_span_id": "span-001",
+          "service_name": "checkout-service",
+          "operation_name": "CheckoutController.processOrder",
+          "start_offset_ms": 4,
+          "duration_ms": 5178,
+          "status": "ERROR",
+          "tags": {
+            "service.version": "v2.4.1",
+            "user.cart_items": 3
+          }
+        },
+        {
+          "span_id": "span-003",
+          "parent_span_id": "span-002",
+          "service_name": "auth-service",
+          "operation_name": "JWT.validateToken",
+          "start_offset_ms": 8,
+          "duration_ms": 16,
+          "status": "OK",
+          "tags": {
+            "auth.user_id": "usr_99214"
+          }
+        },
+        {
+          "span_id": "span-004",
+          "parent_span_id": "span-002",
+          "service_name": "inventory-service",
+          "operation_name": "InventoryClient.reserveItems",
+          "start_offset_ms": 28,
+          "duration_ms": 42,
+          "status": "OK",
+          "tags": {
+            "items.reserved_count": 3
+          }
+        },
+        {
+          "span_id": "span-005",
+          "parent_span_id": "span-002",
+          "service_name": "checkout-service",
+          "operation_name": "LoyaltyDiscountService.applyPromotionalVoucher",
+          "start_offset_ms": 74,
+          "duration_ms": 5104,
+          "status": "ERROR",
+          "tags": {
+            "voucher.code": "SUMMER_SALE",
+            "error": true,
+            "error.kind": "SQLTransientConnectionException",
+            "error.message": "Connection is not available, request timed out after 5000ms"
+          }
+        },
+        {
+          "span_id": "span-006",
+          "parent_span_id": "span-005",
+          "service_name": "postgres-checkout-db",
+          "operation_name": "HikariCP.acquireConnection",
+          "start_offset_ms": 78,
+          "duration_ms": 5002,
+          "status": "ERROR",
+          "tags": {
+            "db.pool": "CheckoutDB-Pool",
+            "db.pool.waiting_threads": 74,
+            "error": "Connection acquisition timeout"
+          }
+        }
+      ]
+    }
+  }
+}
