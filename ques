@@ -1,149 +1,179 @@
-# Observability Lab: Datadog APM & Service Map Flow Investigation
+{
+  "question_code": "RTEL_Q06_E",
+  "problem_code": "rtel_splunk_newrelic_navigation",
+  "exam_code": "p1d9"
+}
 
-## 1\. Investigation Summary & Topology Context
+# Observability Lab: Splunk Search & New Relic APM Performance Auditing
 
-The Datadog investigation identified a production performance degradation centered on payment\-api. The service showed a **14.2% error rate** and **4850 ms P95 latency**.
+## 1. Audit Overview & Objectives
+<!-- Briefly explain the audit scope linking Splunk log searches with New Relic APM & Browser monitoring. -->
 
-The overall transaction flow was:
-
-web\-storefront → checkout\-service → payment\-api → postgres\-payment\-db
-
-The payment\-api also communicated with the external stripe\-external\-gateway.
-
-Analysis of the Datadog Service Map and APM trace showed that the main bottleneck was PostgreSQL database lock contention. A SELECT ... FOR UPDATE query waited approximately 5 seconds and timed out. This caused HTTP 500 failures in payment\-api, which propagated upstream to checkout\-service and affected the web\-storefront.
 
 ---
 
-## 2\. Datadog Service Map Dependency Analysis
+## 2. Splunk Access Log Analysis
 
-| Service Name | Service Type / Engine | Throughput (RPM) | Error Rate (%) | Latency P95 (ms) | Status |
-| --- | --- | --- | --- | --- | --- |
-| web\-storefront | Web / Node.js | 12000 | 3.8 | 520 | WARNING |
-| checkout\-service | API / Java | 4500 | 9.4 | 2800 | DEGRADED |
-| payment\-api | API / Python FastAPI | 1800 | 14.2 | 4850 | CRITICAL |
-| postgres\-payment\-db | Database / PostgreSQL 15.3 | N/A | 18.0 on the payment\-api → database dependency | N/A | CRITICAL |
-| stripe\-external\-gateway | Third\-party | 1600 | 0.2 | 110 | HEALTHY |
+Analyze the sample log events from `splunk_newrelic_audit.json`:
 
-### Service Map Dependency Traversal
+| Timestamp (UTC) | Client IP | HTTP Method | URI Path | HTTP Status Code | Response Time (ms) |
+|---|---|---|---|---|---|
+| `08:14:22Z` | | | | | |
+| `08:15:05Z` | | | | | |
+| `08:15:32Z` | | | | | |
+| `08:16:10Z` | | | | | |
+| `08:16:45Z` | | | | | |
 
-- **Upstream Callers of** **payment\-api****:** checkout\-service, with web\-storefront further upstream through checkout\-service.
-- **Downstream Dependencies of** **payment\-api****:** postgres\-payment\-db and stripe\-external\-gateway.
-- **Propagation of Error Rates:** The payment\-api → postgres\-payment\-db dependency showed an **18.0% error rate**. Database lock contention caused payment requests to time out, contributing to the **14.2% error rate** in payment\-api. These failures propagated upstream to checkout\-service, which showed a **9.4% error rate**, and ultimately affected web\-storefront, which showed a **3.8% error rate** and WARNING status.
-
----
-
-## 3\. APM Trace & Flame Graph Breakdown
-
-Trace ID: dd\-88491029141
-
-Total Trace Duration: **5120 ms**
-
-| Span ID | Service Name | Resource / SQL Statement | Start (ms) | Duration (ms) | % of Trace Latency | Error Flag |
-| --- | --- | --- | --- | --- | --- | --- |
-| span\-dd\-01 | payment\-api | POST /api/v1/payments/process | 0 | 5120 | 100% | 1 |
-| span\-dd\-02 | payment\-api | validate\_customer\_wallet | 5 | 25 | 0.49% | 0 |
-| span\-dd\-03 | payment\-api | SELECT \* FROM payment\_accounts WHERE account\_id = ? FOR UPDATE | 32 | 5008 | 97.81% | 1 |
-| span\-dd\-04 | payment\-api | stripe\_external\_authorize | 5045 | 70 | 1.37% | 0 |
-
-The flame graph clearly identifies span\-dd\-03 as the dominant operation, consuming approximately **97.81%** of the complete payment request duration.
+### Splunk Search Pipeline Queries:
+- **Query to filter HTTP 5xx errors:**
+  ```spl
+  index=web_prod status>=500 | stats count by uri_path, status
+  ```
+- **Observed High-Failure URI Path:**
 
 ---
 
-## 4\. Root Cause & Database Bottleneck Diagnosis
+## 3. New Relic Browser Timing Breakdown
 
-### 1\. Which specific database query is responsible for 97%\+ of the total request latency?
+Examine the end-user page load lifecycle for `https://store.example.com/checkout`:
 
-- **SQL Statement:** SELECT \* FROM payment\_accounts WHERE account\_id = ? FOR UPDATE
-- **Duration:** 5008 ms
-- **Error Type:** psycopg2.errors.QueryCanceled
-- **Error Message:** canceling statement due to statement timeout (5000ms)
-
-The SQL query consumed approximately **97.81%** of the complete 5120 ms trace duration.
-
-### 2\. Why is the database query blocking?
-
-- **PostgreSQL Connection Pool Status:** 98 active connections / 100 maximum connections, which represents approximately **98% connection utilization**. The database also had a **lock wait queue of 34**.
-- **Row Lock Contention (****FOR UPDATE** **clause impact):** The FOR UPDATE clause attempts to lock the selected payment\-account row so concurrent transactions cannot modify it simultaneously. When multiple payment requests access the same locked account record, subsequent transactions must wait for the existing lock to be released. The high database concurrency combined with 34 waiting operations resulted in prolonged lock contention. The sampled query waited until the configured 5000 ms statement timeout was reached and was then canceled.
-
-### 3\. Did the external Stripe payment gateway contribute to this outage?
-
-- **Stripe Latency:** Service Map P95 latency = **110 ms**; sampled APM trace span = **70 ms**
-- **Stripe Error Rate:** **0.2%**
-- **Conclusion:** No. stripe\-external\-gateway was HEALTHY. The Stripe operation completed successfully in only 70 ms in the sampled trace, while the PostgreSQL query consumed 5008 ms and failed. Therefore, the external payment gateway was not the primary cause of the outage.
+| Page Load Phase | Duration (ms) | Percentage of Total Page Load (%) | Operational Meaning |
+|---|---|---|---|
+| **DNS Lookup** | | | |
+| **TCP & SSL Handshake** | | | |
+| **Backend Duration (Time to First Byte - TTFB)** | | | |
+| **DOM Processing** | | | |
+| **Page Rendering** | | | |
+| **Total Page Load Time** | | 100% | |
 
 ---
 
-## 5\. Architectural Remediation & Observability Recommendations
+## 4. New Relic APM Transaction Trace Breakdown
 
-### 1\. Query Optimization & Lock Management
+Examine the backend execution trace for `WebTransaction/Custom/Checkout/SubmitOrder`:
 
-**Recommendation:**
-
-Optimize the payment account query and reduce the amount of time database transactions hold row\-level locks.
-
-Instead of retrieving unnecessary columns using:
-
-SELECT \*
-
-retrieve only the columns required for payment processing and verify that account\_id is appropriately indexed.
-
-The application should keep transactions containing FOR UPDATE as short as possible and avoid performing long\-running work or external API calls while holding database locks.
-
-Where application semantics permit, PostgreSQL locking approaches such as FOR UPDATE NOWAIT or FOR UPDATE SKIP LOCKED can also be evaluated to prevent requests from waiting several seconds for locked rows.
-
-### 2\. PostgreSQL Connection Pool & Lock Monitoring
-
-**Recommendation:**
-
-Review the application's database connection\-pool configuration against PostgreSQL's max\_connections and expected payment concurrency.
-
-The incident showed **98 of 100 connections active**, leaving almost no connection headroom.
-
-Datadog monitors should track:
-
-- Active database connections
-- Connection utilization
-- Lock wait count
-- Database query duration
-- Statement timeouts
-- Payment API error rate
-- P95/P99 response latency
-
-A practical warning can be configured when connection utilization exceeds approximately **80%**, with a critical alert at approximately **90%**, together with an increasing lock\-wait queue.
-
-### 3\. Datadog APM Monitoring & Alerting
-
-**Recommendation:**
-
-Configure Datadog monitors and APM dashboards to detect abnormal payment behavior before it becomes a major outage.
-
-Monitoring should include:
-
-- payment\-api error rate above **5%**
-- Increasing P95/P99 payment latency
-- PostgreSQL connection utilization above **80–90%**
-- Increasing PostgreSQL lock\-wait queue
-- Queries approaching the **5000 ms** statement timeout
-- HTTP 5xx responses
-- Slow database APM spans
-
-Datadog distributed tracing should continue to be used to correlate web\-storefront, checkout\-service, payment\-api, PostgreSQL, and external payment dependencies.
+| Segment Name | Total Duration (ms) | Exclusive Duration (ms) | Percentage Contribution (%) |
+|---|---|---|---|
+| `Application: CheckoutController.submit` | | | |
+| `External: PaymentGatewayClient.charge` | | | |
+| `Database: Postgres OrderRepository.save` | | | |
 
 ---
 
-## Root Cause Summary
+## 5. Correlated Findings & Remediation Strategy
 
-The root cause of the production degradation was **PostgreSQL row\-lock contention combined with very high database connection utilization**.
+Answer the following diagnostic questions:
 
-The query:
+1. **Does the 6.84-second user delay originate on the client-side (frontend rendering) or server-side (backend TTFB)?**
+   - *Evidence from New Relic Browser timing:*
 
-SELECT \* FROM payment\_accounts WHERE account\_id = ? FOR UPDATE
+2. **Which backend segment in New Relic APM accounts for 99%+ of the server response time?**
+   - *Failing Component:*
+   - *Exclusive Duration:*
 
-spent **5008 ms** waiting and eventually failed with a PostgreSQL statement timeout. At the same time, the database had **98/100 active connections** and **34 operations in the lock wait queue**.
+3. **How do the Splunk 504 logs correlate with the New Relic transaction trace findings?**
+   - *Correlation:*
 
-The resulting database failures propagated through:
+---
 
-postgres\-payment\-db → payment\-api → checkout\-service → web\-storefront
+## 6. Audit Recommendations & Monitoring Actions
+<!-- Provide 3 concrete recommendations for alerting and optimizing frontend/backend latency. -->
 
-The external Stripe gateway remained healthy and was not the source of the outage.
 
+
+{
+  "audit_metadata": {
+    "system_name": "Global Retail Web Platform",
+    "audit_scope": "Splunk Access Log Search & New Relic APM / Browser Timing Audit",
+    "investigation_period": "2026-11-16T08:00:00Z to 2026-11-16T08:30:00Z"
+  },
+  "splunk_log_index": {
+    "index_name": "web_prod",
+    "total_events_searched": 14500,
+    "sample_events": [
+      {
+        "_time": "2026-11-16T08:14:22Z",
+        "client_ip": "198.51.100.22",
+        "http_method": "GET",
+        "uri_path": "/products/catalog",
+        "status": 200,
+        "response_time_ms": 140,
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+      },
+      {
+        "_time": "2026-11-16T08:15:05Z",
+        "client_ip": "203.0.113.41",
+        "http_method": "POST",
+        "uri_path": "/checkout/payment",
+        "status": 504,
+        "response_time_ms": 5240,
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+      },
+      {
+        "_time": "2026-11-16T08:15:32Z",
+        "client_ip": "192.0.2.89",
+        "http_method": "POST",
+        "uri_path": "/checkout/payment",
+        "status": 504,
+        "response_time_ms": 5190,
+        "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5)"
+      },
+      {
+        "_time": "2026-11-16T08:16:10Z",
+        "client_ip": "198.51.100.104",
+        "http_method": "GET",
+        "uri_path": "/user/profile",
+        "status": 200,
+        "response_time_ms": 95,
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+      },
+      {
+        "_time": "2026-11-16T08:16:45Z",
+        "client_ip": "203.0.113.112",
+        "http_method": "POST",
+        "uri_path": "/checkout/payment",
+        "status": 502,
+        "response_time_ms": 4980,
+        "user_agent": "Mozilla/5.0 (X11; Linux x86_64)"
+      }
+    ]
+  },
+  "newrelic_performance": {
+    "browser_timing": {
+      "page_url": "https://store.example.com/checkout",
+      "total_page_load_time_sec": 6.84,
+      "apdex_score": 0.41,
+      "timing_segments_ms": {
+        "dns_lookup_ms": 18,
+        "tcp_ssl_connection_ms": 42,
+        "backend_duration_wait_time_ms": 5120,
+        "dom_processing_ms": 1120,
+        "page_rendering_ms": 540
+      }
+    },
+    "apm_transaction_trace": {
+      "transaction_name": "WebTransaction/Custom/Checkout/SubmitOrder",
+      "total_duration_ms": 5120,
+      "segments": [
+        {
+          "segment_name": "Application: CheckoutController.submit",
+          "duration_ms": 5120,
+          "exclusive_duration_ms": 25,
+          "percent_contribution": 0.49
+        },
+        {
+          "segment_name": "External: PaymentGatewayClient.charge",
+          "duration_ms": 5080,
+          "exclusive_duration_ms": 5080,
+          "percent_contribution": 99.22
+        },
+        {
+          "segment_name": "Database: Postgres OrderRepository.save",
+          "duration_ms": 15,
+          "exclusive_duration_ms": 15,
+          "percent_contribution": 0.29
+        }
+      ]
+    }
+  }
+}
