@@ -1,0 +1,946 @@
+evolution of data platforms:
+1960-1970: File based systems
+1980-1990: Relational db
+1990-2000: Data warehouse
+2000-2010: Big data & data lakes
+2010-2020: Cloud & Lakehouse
+2020-Present: Real time & AI-Native
+
+key stages 
+Generation->Architecture->technologies->primary purpose
+1. Traditional Systems->File storage->COBOL,VSAM->Transaction records
+2. RDBMS-> centralized db-> oracle, sql server, postgresql->structured transactions
+3. Data Warehouse->ETL+OLAP-> Teradata,Informatica,SSIS->
+4. Big data->Distributed processing->
+
+Twelve words need to remember:
+- object storage
+- table format
+- catalog
+- ETL/ELT
+- CDC
+- Partition
+- Idempotency
+- BAckfill
+
+1.Object Storage:
+stores data as objects in scalable storage systems rather than traditional db tables or files on local disks
+examples- Amazon S3, azure data lake storage and google cloud storage
+
+2. Table format:(LAkehouse table management)
+meta data and management layer
+
+3. Catalogue:(data discovery)
+central system that maintains info about available datasets, tables, schemas, locations, and often permissions or governance metadata
+
+4. ETL/ELT:(data integration)
+
+5.CDC:(change data capture)
+data ingestion
+identifies changes in source db and propagates those changes to downstream systems without repeatedly copying all records
+
+6. Partition:(data organization)
+divides a large table or dataset into smaller logical groups, often based on dates,region,categories
+
+7. Idempotency: (data reliability)
+repeating the same operation procedures the same intended final state, without unwanted duplication or side effects
+
+8. Backfill: (historical data recover)
+processing or re-processing historical data to fill gaps or apply corrected business logic
+
+9. SLA/SLO: (data service reliability)
+sla: a formal commitment about the quality or availability of a service, potentially including contractual consequences
+slo(service level objective): a measurable target used to evaluate service reliability
+
+10. Lineage: (data governance)
+documents where data originates how it is transformed and which downstream systems depends on it
+
+11. Skew: (Distributed processing)
+occurs when work or data is unevenly distributed across processing tasks or partitions
+
+12. Watermark: (Stream Processing)
+streaming system's estimate of event time progress. It helps determine when time widnows can be finalized and how late arriving events should be handled
+
+pyproject.toml:
+main configuration file for python
+toml=Tom's Obvious Minimal language
+
+Traditional vs Modern data platforms:
+traditional architecture:
+business applications-> relational db-> batch ETL-> data warehouse-> BI Reports
+
+Modern architecture:
+Apps,Iot,APIs,Saas-> Batch+ streaming -> cloud lakehouse -> sql,ml,vector search -> BI+AI+Agents
+
+
+key trends in modern data platforms:
+- data lakehouse
+- data fabric
+- data mesh
+- real time analytics
+- dataops
+- ai-native data platforms
+- governance and security
+
+OLTP vs OLAP
+Primary purpose: 			
+OLTP : process operational transactions				
+OLAP: analyze data and support decisions
+
+Workload:
+OLTP: many short, concurrent read/writes
+OLAP: fewer but heavier scans, joins, aggregations
+
+Data:
+OTLP: current, detailed operational records
+OLAP: historical, integrated, often summarized
+
+Typical Operations:
+OLTP: insert, update, delete, point lookups
+OLAP: LArge scans, group-by, aggregations, comparisons
+
+Schema:
+OLTP: Normalized (usually 3nf) for integrity
+OLAP: Often denormalized(Star/snowflake) or wide tables
+
+Storage:
+OLTP: typically row oriented
+OLAP: typically column oriented
+
+Latency goal: 
+OLTP: ms
+OLAP: sec
+
+
+Bronze,Silver,Gold architecture(also called medallion architecture)
+- Data design pattern for organizing data in a lakehouse 
+- It progressively refines data quality and structure as it moves through layers
+bronze -> silver -> gold
+
+design-application developers
+data-analysts & db admins
+
+the 3 layers:
+Bronze
+raw data
+ingest
+preserve
+audit
+
+Silver
+clean data
+validate
+deduplicate
+standardize
+
+gold
+business data
+aggregate
+calculate KPIs
+publish
+
+
+medallion architecture:
+batch	-> raw data(Bronze) -> 		silver		    ->       Gold
+streaming  Raw integration	(filtered,cleaned,augmented  	business level  
+								aggregates
+								
+								
+Technologies used:
+Raw data storage:
+AWS: Amazon S3
+Azure: ADLS Gen2
+GCP: cloud storage
+
+11-11-2026
+Batch Microbatch and streaming
+Batch: Scheduled windows,regulatory reporting,billing runs,finance close, data warehouse loads
+Micro batch: small windows,operational dashboards,near real time inventory, cdc replication
+Streaming: event at a time,continuous
+
+One transaction,seven hops:
+1) Source
+2) Capture
+3) Transport
+4) Land
+5) Transform
+6) Aggregate
+7) Serve
+
+
+Data Ingestion LAyer:
+Ingestion type:
+- Batch ingestion
+- Real time streaming
+- Change data capture
+- API ingestion
+- File ingestion
+- Iot ingestion
+
+Data Processing layer:
+Type:
+- Batch processing
+- Stream processing
+- Micro batch processing
+
+Data Serving layer:
+Mechanism:
+- Sql query engine
+- Data warehouse
+- Semantic layer
+- REST / GraphQl APIs
+- Search/vector index
+- Feature serving
+- CAche
+
+
+Orchestration:
+Process of coordinating, scheduling,executing,monitoring and managing data pipelines automatically
+
+how orchestration works:
+Orchestrator/scheduler
+1) ingestion
+2) Bronze layer
+3) Silver layer
+4) GOld layer
+5) analytics
+monitoring,retries,alerts
+
+
+
+Apache Airflow:
+open source workflow orchestration platform used to schedule, execute , monitor and manage data pipelines automatically
+
+
+Dataops and observability:
+set of practices that combines agile methodologies , devops principles, automation data pipelines and deployments
+
+
+databricks components:
+notebooks
+jobs/workflows
+clusters/compute
+dashboards
+repos(git)
+MLflow
+Libraries
+Delta lake
+Files/volumes
+Unity catalog
+Sql warehouse
+
+
+delta lakes:
+open source storage framework that brings db like reliability,transactions,and data
+
+core architecture:
+- acid transactions
+- time travel
+- schema enforcement & evolution
+- unified batch + streaming
+- dml operations
+- scalable metadata
+- performance
+- change data feed(CDF)
+- Interoperability
+
+data lake:storage system(where the data lives)
+delta lake: open table format/storage(how the data is organized and made reliable)
+data bricks:analytics platform(what processes,queries,governs and analyzes the data)
+
+12-11-2026
+databricks cluster lifecycle
+create->pending->running->terminating->terminated
+create->pending->running
+running->resizing->running
+running->restarting->running
+running->terminating->terminated
+terminated->start->pending->running
+any state->error(on failure)
+
+
+snowflake architecture:
+- warehouse sizing
+- auto suspend& resume
+- roles & rbac
+- query lifecycle
+- query profile analysis
+- 
+
+virtual warehouse:
+independent compute cluster responsible for executing sql queries,loading and transforming data and performing analytical operations
+provides: cpu,memory,temp storage, elastic computing, workload isolation
+
+virtual warehouse architecture:
+
+snowflake:
+fully managed,cloud native data platform used for data warehousing, data engineering,analytics,ai/ml and secure data sharing
+
+snowflake 3 layer architecture:
+cloud services layer-authentication , metadata, query optimizer
+compute layer(warehouses)-vw1,vw2,vw3
+storage layer-columnar storage
+
+characteristics:
+- separate compute&storage
+- multi-cluster, multi workload
+- high performance
+- fully managed
+- secure & governed
+- built in data sharing
+- data resilience
+- cost efficient
+
+
+WAREHOUSE SIZING
+process of estimating the storage, compute, memory and infrastructure capacity required for a data warehouse to handle current workloads and future growth
+parameters:
+- data volume
+- daily ingestion
+- retention period
+- data growth
+- concurrent users
+- query complexity
+- sla
+- etl/elt workload
+- availability
+- compression
+
+
+SNOWFLAKE ROLES & RBAC
+RBAC(ROLE BASED ACCESS CONTROL)
+ security mechanism
+ 
+ STAGES OF QUERY LIFECYCLE:
+ - SUBMISSION (RECEIVES SQL FROM CLIENT)
+ - AUTHENTICATION (VERIFIES IDENTITY AND PRIVILEGES)
+ - PARSING
+ - OPTIMIZATION
+ - CACHE EVALUATION
+ - WAREHOUSE SCHEDULING
+ - EXECUTION
+ - RESULT DELIVERY
+ - MONITORING
+ 
+ 
+ QUERY PROFILE ANALYSIS:
+ performance analysis tool in snowflake that provides a graphical representation of how a sql query was executed
+ it helps developer,data engineers and administrators understand:
+ - how snowfllake executes a query
+ - which operations consume the most execution time 
+ - how much data is scanned
+ - whether micro-partition pruning is effective
+ - whether joins generate excessive records
+ - whether    memory or disk spilling occurs
+ - how to  optimize query performance and compute
+ 
+ query profile architecture:
+ 
+ 13-11-2026
+ KAFKA:
+ Apache Kafka is a distributed event store and stream-processing platform. It is an open-source system developed by the Apache Software Foundation written in Java and Scala. The project aims to provide a unified, high-throughput, low-latency platform for handling real-time data feeds.
+ 
+ why kafka:
+ producers
+ consumers
+ streams
+ 
+ components:
+ producers: app that create and send events
+ controller/kraft: manages cluster data, controller leadership and cluster coordination
+ consumers: app that read and process messages from topics
+ kafka connect: integrated data integration framework to quickly and reliable move data into and out of kafka
+ kafka streams: a clinet lib for building real time stream processing app
+ schema registry: centralized schema management for kafka
+ offsets(customer position): tracks the last processes msg for each consumer group so consumers can resume from where they left off
+ store messages: brokers persist messages for each partition
+ replication: copies each partition across multiple brokers to ensure fault tolerance,high availability, data durability
+ 
+ 
+ major kafka components:
+ producer- creates events
+ kafka broker-stores events
+ consumers-process events
+ 
+ broker: server that stores topic partitions
+ leader replica: handles reads/writes for a partition
+ follower replica-copies data
+ 
+ kafka partition strategy:
+ partitioning:
+ splits a topic into multiple ordered, independent partitions to achieve scalability , parallelism and higher throughput
+ 
+ benefits:
+ - scalability
+ - parallel processing
+ - high throughput
+ - fault tolerance
+ - ordering
+ 
+ partition strategy:
+ key based
+ round robin
+ custom partitioner
+ hash based
+ 
+ consumer group:
+ collection of consumer instances that work tohgether to consume and process messages from one or more kafka process
+ 
+ consumer   						Consumer group
+ individual application instances	collection of consumer instances
+ reads and processes messages		shares processing responsibilities
+ can consume multiple partitions	distributes partitions
+ 
+ kafka rebalancing:
+ redistributing topic partitions among consumers in a consumer group when the group membership changes(consumer joins,leaves or fails)
+ 
+ rebalancing strategies:
+ range assignor-consecutive partitions to consumers
+ round robin assigner - partitions distributed evenly
+ sticky assigner(default)-keeps existing assignments as much as possible
+ 
+ kafka consumer lag analysis
+ the no of unconsumed messages a consumer group is behind for a partition
+ 
+ formula: lag= log end offset(LEO)-committed offset
+ 
+ common causes of high lag:
+ - slow processing logic
+ - insufficient consumers
+ - consumer downtime or frequent restarts
+ - long poll/batch configuration
+ - resource constraints
+ 
+ how to reduce lag:
+ - increase the number of consumer instances
+ - optimize processing logic
+ - tune consumer configs
+ - ensure sufficient resources
+ - use backpressure and monitor regularly
+ 
+ kafka delivery gurantees:
+ how many times a message is delivered and processes by a consumer
+- at-most-once(0 or 1)
+possible data loss, no duplicates,low complexity,high performance
+- at-least-once
+no data loss, possible duplicates, medium complexity,high performance
+- exactly-once
+no data loss,no duplicates,high complexity, moderate performance(used in any atomic transactions)
+
+
+16-11-2026
+CLOUD STREAMING:
+AWS KINESIS
+AZURE EVENT HUBS
+GOOGLE PUB/SUB
+
+COMMON USE CASES:
+- Real timr data analytics
+- app and infrastructure log ingestion
+- iot sensor data processing
+- fraud detection
+
+streaming architecture:
+app	iot devices	web/mobile	log sources
+ managed cloud streaming platform
+awskinesis	azure event hubs	google pub/sub
+stream processing	data lake	data warehouse	microservices
+
+aws kinesis:
+managed streaming service for collecting,storing and processing real time data
+data producer->kinesis data stream
+used for asynchronous call
+
+components:
+- producer
+- data stream
+- shared
+- partition key
+- sequence number
+- consumer
+- checkpoint
+
+key features:
+- provisioned and on-demand capacity modes
+- parallel processing through shards
+
+AZURE EVENT HUBS:
+microsoft fully managed, high throughput event ingestion and streaming platform
+provides an apache kafka compatible endpoint
+
+event producers->azure event hubs->consumers
+
+components:
+- namespace
+- event hub
+- partition
+- partition eky
+- consumer group
+- offset
+- checkpoint
+- capture
+
+GOOGLE PUB/SUB:
+fully managed,scalable
+
+order publisher->pub/sub topic->subscriptions
+
+components:
+publisher
+topic
+subscription
+subscriber
+acknowledgment
+ordering key
+
+
+
+Pipeline orchestration:
+topics covered:
+- airflow dag componenets
+- task lifecycle
+- retry mechanisms
+- trigger rules
+- dbt models
+
+AIRFLOW DAG COMPONENTS
+represents workflow as a collection of tasks organized with dependencies, scheduling rules and execution configurations
+
+dag
+schedule
+dag run
+task
+task dependency
+operator
+dependency
+task instance
+sensor
+task group
+xcom
+variables
+connections
+
+
+Airflow architecture:
+user->web server->scheduler->executor->worker(s)
+
+dag execution flow:
+- define dag
+- schedule
+- trigger
+- run 
+- monitor
+
+dag and task dependencies:
+start
+extract data-clean data, validate data
+load data
+end
+
+types of operators:
+- PythonOperator
+- BashOperator
+- EMptyOperator
+- SQLExcuteQUeryOperator
+- SparkSubmitOperator
+- HttpOperator
+- BranchPythonOperator
+- EmailOperator
+- FileSensor
+
+apache airflow concepts:
+task lifecycle(manages the diff execution states of a task)
+retry mechanisms(automatically recovers from temporary failures
+trigger rules(Determines when downstream tasks should executes)
+
+
+task lifecycle states:
+- none
+- scheduled
+- queued
+- running
+- success
+- failed
+- up_for_Entry
+- up_for_schedule
+- deferred
+- skipped
+- upstream_failed
+- removed
+- restarting
+
+retry configuration paramters:
+- retries
+- retry_delay
+- retry_exponential_backoff
+- max_retry_delay
+- on_retry_callback
+- on_failre_callback
+- execution_timeout
+
+types:
+- fixed retry delay
+- exponential backoff
+
+TRIGGER RULES:
+determines whether a task should execute based on the result of its upstream
+
+airflow logging architecture:
+		airflow dag execution
+extract orders	transform orders	load orders
+task instance	task instance logs	task intsance logs
+
+types of airflow logs:
+task logs(task execution,output and exceptions)
+scheduler logs (dag scheduling and task scheduling decisions)
+worker (task execution and worker related issues)
+dag processor 
+api server/webserver
+trigerer logs
+
+log levels:
+debug (detailed diagnostic info)
+info(normal execution info)
+warning(potential problem,execution may continue)
+error (an operation has failed)
+critical (severe error condition)
+
+dbt models & lineage:
+dbt(data build tool) is a data transformation framework
+it enables data engineers and analytics engineers to transform 
+
+dbt architecture
+source systems(erp,crm,api,kafka)
+cloud data warehouse->raw data(source tables),dbt transformation models,business ready data
+business intelligence(pbi,tabeleu
+
+role of dbt in modern architecture:
+data sources(api/db)->data ingestion(kafka/airflow)->raw data(snowflake)->dbt(transformation)->staging models(clean & standardize)->intermediate models(join & enrich)->mart models(business analytics)->BI/reports/dashboards
+
+types of dbt models:
+raw/source lsyer
+staging models(cleaning)
+intermediate models(joining)
+mart models(datasets)
+
+model layer types:
+staging intermediate marts dimension fact
+
+DATA MARTS:
+business ready datamodel model created from cleaned and transformed data to support reporting,dashboards, BI and analytics
+
+step1:load seed data
+dbt seed
+step2:execute the models
+dbt run
+step3:execute data quality tests
+dbt test
+step4: generate documentation
+dbt docs generate
+step5: start the documentation server
+dbt docs serve
+
+
+17-11-2026
+data lineage:
+describes how data flows from raw source tables through different transformation models to final analytical tables,dashboards and reports
+
+dbt data lineage architecture:
+source -raw data(raw-Orders raw_customers raw_restaurants
+standing-bronze/silver(stg_orders stg_customers stg_customers stg_restaurants)
+intermediate-business logic (int_order_details)
+marts-gold (fct_rders mart_city_revenue)
+BI dashboards
+
+DBT TESTING:
+mechanism for validating data quality,integrity,consistency and transformation logic within a data platform
+dbt also supports unit testing of transformation logic
+
+dbt testing architecture:
+raw sources->staging models->intermediate->data marts
+dbt testing framework(generic , singular, unit, custom generic)
+
+types of dbt tests:
+built in generic tests(standard data quality validation defined in yaml)
+sutom generic tests(reusable business specific validation sql+yaml)
+singular tests(specific business rules sql)
+unit tests(validate transformation logic using mock inputs yaml)
+
+
+AZURE DATA FACTORY PIPELINES
+AZURE DATA FACTORY(ADF): cloud based data integration and orchestration service used to build,schedule,execute and monitor data pipelines across different data sources
+
+ADF PIPELINE
+logical collection of activities that work together to accomplish a data integration task
+
+adf lifecycle:
+author->validate->debug->publish->trigger->monitor
+
+
+AZURE DATA FACTORY ARCHITECTURE:
+AZURE DATA FACTORY
+data sources	adf pipeline	data destinations
+Integration runtime-execution infrastructure
+
+core components of azure data factory:
+- pipeline
+- activity
+- linked service
+- dataset
+- integration runtime
+- trigger
+- parameter
+- variable
+- data flow
+
+
+
+TYPES OF PIPELINE ACTIVITIES:
+DATA INETGRATION-ACTIVITY CATEGORIES
+data movement activities(sql server->azure data lake)
+data transformation activties(raw data->transform->curated data)
+control flow activties(decisions,loops,depedencies like for rach unti, if condition,lookup,execute piepline)
+
+Integration runtime:
+provides infrastructure for data movement,managed transformations and dispatching external processing jobs
+
+IR type:
+azure ir(cloud based)
+self-hosted ir(on premises)
+azure-ssis ir(execution of existing ssis packages)
+
+pipeline triggers:
+manual execution
+schedule trigger
+tumbling window trigger(process data in hourli time windowa)
+storage event trigger(execute when a new file arrives)
+custom event trigger(execute based on a custom event)
+
+
+
+
+spark execution plan:
+lifecycle
+user sql/ dataframeapi (user query / dataframe operation submitted to spark)
+unresolved logical plan(logical plan created)
+analyzed logical plan (logical plan with resolved tables,columns and data types)
+optimized logical plan (efficient plan after rule based and cost based optimizations)
+physical execution plan (executable plan with physical operators)
+distributed plan (plan executed in a distributed manner across the cluster)
+
+TYPES OF EXECUTION PLANS:
+parsed logical plan
+analysed logical plan(semantic check)
+optimized logical plan (pruning)
+physical execution plan (compute actual resource usage)
+
+
+Shuffle operations in apache spark:
+process of re-distributing data 
+
+Narrow transformation: no shuffling required
+local partition
+data movement : none
+execution cost : low
+Wide Transformation: read it from multiple transaction and transaction require shuffling
+wide partition
+data movement : across partitions
+execution cost: high
+
+operations:
+groupBy()
+reduceByKey()
+
+
+shuffle write (compute)
+shuffle read 
+
+skewed partition: (not equally distributed)
+
+balanced partition: (work equally distributed)
+
+shuffle optimization techniques:
+1) Filter data before shuffle
+2)broadcast 
+3) configure shuffle partitions
+4)enable adaptive query execution
+5) Repartition vs coalesce(combines existing partitions)
+
+
+DELTA LAKE:
+FILE OPTIMIZATION:
+- OPTIMIZE
+- AUTO COMPACTION
+- OPTIMIZED writes
+DATA LAYOUT:
+- liquid clustering
+- z-order
+partitioning
+QUERY OPRITMIZATION:
+- data      skipping
+- partition pruning
+- predicate pushdown
+
+FILE OPTIMIZATION:
+OPTIMIZATION TECHNIQUES:
+- optimize(merge and create small files)(small file compaction)
+- optimized wires(reduce small file creation)
+- auto compaction(compressing files)
+- z-order(colocate data)
+- liquid clustering(enables data layout to evolve as query patterns change)
+- partitioning
+- data skipping(maintains file level statistics)
+- predicate pushdown
+- vacuum(delete obsolete files for storage optimization)
+- statistics
+- partition pruning)
+
+
+snowflake spilling:
+not having sufficient memory
+how it works:
+sql query
+virtual warehouse memory
+local disk spilling
+remote cloud storage spilling
+
+types:
+no spilling-storage location:warehouse mem,performance-fast
+local spilling,warehouse local disk,slower
+remote spilling,remote cloud storage
+
+common causes:
+- large join operations
+- large group by aggregations
+- sorting millions of records
+- complex window functions
+- insufficient warehouse memory
+- exploding joins producing excessive intermediate records
+
+
+how to reduce spilling:
+- increase warehouse size
+- filter data earlier
+- correct join conditions
+- remove unnecessary sorting
+- process smaller batches
+- select required columns only
+
+snowflake partition pruning:
+optimization technique in which snowflake skips micro-partitions 
+
+18-11-2026
+KAFKA PRODUCER BACK PRESSURE:
+Occurs when a producer generates messages faster than kafka brokers can accept and acknowledge them
+
+INTERNAL WORKING OF KAFKA PRODUCER:
+APPLICATION->SERIALIZE->RECORD ACCUMULATOR->SENDER->BROKER
+
+CAUSES OF BACK PRESSURE:
+HIGH MESSAGE PRODUCTION RATE
+- slow broker disk I/O
+- network congestion
+- Broker cpu overload
+- slow replica synchronization
+- uneven partition distribution
+- broker unavailable
+- producer quota exceeded
+
+
+ASPECT		
+PRODUCER BACKPRESSURE: producer to broker path
+consumer lag: broker to consumer path
+
+IDEMPOTENT PRODUCER
+ensures retrying same kafka producer batch does not result in duplication
+
+types:
+idempotent(no duplicates)
+no-idempotent(duplocates)
+
+important identifiers:
+- producer id
+- producer epoch
+-sequence number
+
+configuration:
+enable idempotence
+acks all
+retries greater than o
+
+INCIDENT MANAGEMENT:
+JOB MONITORING:
+process of continuously tracking data pipeline execution, job status, performance, resource utilization, and failures to ensure reliable data delivery
+ARCHITECTURE:
+apache airflow		databricks	azure data factory	snowflake
+central job monitoring
+dashboards alerting	diagnostics	recovery
+
+what should be monitored:
+- job status
+- execution duration
+- start and end time
+- retry count
+- cpu and memory
+- records processes
+- error logs
+- sla compilance
+- execution cose
+
+job execution lifecycle
+scheduled->queued->running->failed(retry)/success
+
+job run states:
+- succeeded
+- failed
+- running
+- pending
+-queued
+- timed out
+- canceled
+- skipped
+- succeded with failure
+
+ALERT MANAGEMENT:
+process of automatically detecting failures, performance degradation, data quality issues and infrastructure problems in data pipelines
+
+ALERT TYPES:
+- Job failure
+- Performance
+- data quality
+- data freshness
+- resource utilization
+- streaming
+- sla violation
+- cost
+- connectivity
+
+SEVERITY LEVELS:
+P1-CRITICAL(immediate action)
+P2-HIGH(urgent investigation)
+P3-MEDIUM(Investigate soon)
+P4-LOW(Informational)
+
+ALERT PRIORITY:
+Factors influencing:
+- business impact
+- severity
+- urgency
+- data criticality
+- sla impact
+- Blast radius
+- environment
+- recoverability
+
+incidents & assigned team:
+all kafka brokers unavailable-Platform ops
+kafka consumer lag increasing rapidly- data engineering
+
+
+TYPES OF ESCALATION:
+functional(escalate to a team with specialized experience)
+hierarchial(escalate to higher management)
+time based
+vendor
+business
+
