@@ -1,179 +1,191 @@
-{
-  "question_code": "RTEL_Q06_E",
-  "problem_code": "rtel_splunk_newrelic_navigation",
-  "exam_code": "p1d9"
-}
-
 # Observability Lab: Splunk Search & New Relic APM Performance Auditing
 
-## 1. Audit Overview & Objectives
-<!-- Briefly explain the audit scope linking Splunk log searches with New Relic APM & Browser monitoring. -->
+## 1\. Audit Overview & Objectives
 
+The audit investigates checkout performance degradation by correlating Splunk web access logs with New Relic Browser monitoring and New Relic APM transaction traces.
+
+Splunk was used to identify HTTP 5xx failures and response times for the affected checkout endpoint. New Relic Browser timing was used to determine whether the user\-facing delay originated from frontend processing or backend response time. New Relic APM was then used to isolate the backend component contributing most of the transaction latency.
+
+The investigation showed that /checkout/payment experienced multiple HTTP 502/504 failures with response times close to 5 seconds. New Relic identified the external PaymentGatewayClient.charge operation as the primary backend bottleneck.
 
 ---
 
-## 2. Splunk Access Log Analysis
-
-Analyze the sample log events from `splunk_newrelic_audit.json`:
+## 2\. Splunk Access Log Analysis
 
 | Timestamp (UTC) | Client IP | HTTP Method | URI Path | HTTP Status Code | Response Time (ms) |
-|---|---|---|---|---|---|
-| `08:14:22Z` | | | | | |
-| `08:15:05Z` | | | | | |
-| `08:15:32Z` | | | | | |
-| `08:16:10Z` | | | | | |
-| `08:16:45Z` | | | | | |
+| --- | --- | --- | --- | --- | --- |
+| 08:14:22Z | 198.51.100.22 | GET | /products/catalog | 200 | 140 |
+| 08:15:05Z | 203.0.113.41 | POST | /checkout/payment | 504 | 5240 |
+| 08:15:32Z | 192.0.2.89 | POST | /checkout/payment | 504 | 5190 |
+| 08:16:10Z | 198.51.100.104 | GET | /user/profile | 200 | 95 |
+| 08:16:45Z | 203.0.113.112 | POST | /checkout/payment | 502 | 4980 |
 
-### Splunk Search Pipeline Queries:
-- **Query to filter HTTP 5xx errors:**
-  ```spl
-  index=web_prod status>=500 | stats count by uri_path, status
-  ```
-- **Observed High-Failure URI Path:**
+### Splunk Search Pipeline Queries
+
+**Query to filter HTTP 5xx errors:**
+
+index=web\_prod status>=500 \| stats count by uri\_path, status
+
+**Observed High\-Failure URI Path:**
+
+/checkout/payment
+
+The sample contains three HTTP 5xx failures for /checkout/payment: two HTTP 504 responses and one HTTP 502 response. Their response times ranged from **4980 ms to 5240 ms**, indicating a consistent backend delay of approximately 5 seconds.
 
 ---
 
-## 3. New Relic Browser Timing Breakdown
+## 3\. New Relic Browser Timing Breakdown
 
-Examine the end-user page load lifecycle for `https://store.example.com/checkout`:
+The total checkout page load time was **6.84 seconds (6840 ms)**.
 
 | Page Load Phase | Duration (ms) | Percentage of Total Page Load (%) | Operational Meaning |
-|---|---|---|---|
-| **DNS Lookup** | | | |
-| **TCP & SSL Handshake** | | | |
-| **Backend Duration (Time to First Byte - TTFB)** | | | |
-| **DOM Processing** | | | |
-| **Page Rendering** | | | |
-| **Total Page Load Time** | | 100% | |
+| --- | --- | --- | --- |
+| **DNS Lookup** | 18 | 0.26% | Time required to resolve the website hostname |
+| **TCP & SSL Handshake** | 42 | 0.61% | Time required to establish the network connection and TLS session |
+| **Backend Duration (TTFB)** | 5120 | 74.85% | Time the browser waited for the server/backend response |
+| **DOM Processing** | 1120 | 16.37% | Time spent processing the HTML and constructing the DOM |
+| **Page Rendering** | 540 | 7.89% | Time spent rendering the page in the browser |
+| **Total Page Load Time** | 6840 | 100% | Complete observed checkout page\-load duration |
+
+The backend TTFB of **5120 ms** represented approximately **74.85%** of the complete page\-load time. Therefore, the majority of the user\-facing delay originated from the server\-side processing rather than DNS, connection establishment or frontend rendering.
+
+The New Relic Browser Apdex score was **0.41**, further indicating significant degradation in the checkout user experience.
 
 ---
 
-## 4. New Relic APM Transaction Trace Breakdown
+## 4\. New Relic APM Transaction Trace Breakdown
 
-Examine the backend execution trace for `WebTransaction/Custom/Checkout/SubmitOrder`:
+Transaction:
+
+WebTransaction/Custom/Checkout/SubmitOrder
+
+Total transaction duration: **5120 ms**
 
 | Segment Name | Total Duration (ms) | Exclusive Duration (ms) | Percentage Contribution (%) |
-|---|---|---|---|
-| `Application: CheckoutController.submit` | | | |
-| `External: PaymentGatewayClient.charge` | | | |
-| `Database: Postgres OrderRepository.save` | | | |
+| --- | --- | --- | --- |
+| Application: CheckoutController.submit | 5120 | 25 | 0.49% |
+| External: PaymentGatewayClient.charge | 5080 | 5080 | 99.22% |
+| Database: Postgres OrderRepository.save | 15 | 15 | 0.29% |
+
+The CheckoutController.submit segment represents the overall application transaction, but only **25 ms** was exclusive application\-processing time.
+
+The external PaymentGatewayClient.charge call consumed **5080 ms**, representing **99.22%** of the complete backend transaction.
+
+The PostgreSQL save operation took only **15 ms**, indicating that the database was not the primary bottleneck in this incident.
 
 ---
 
-## 5. Correlated Findings & Remediation Strategy
+## 5\. Correlated Findings & Remediation Strategy
 
-Answer the following diagnostic questions:
+### 1\. Does the 6.84\-second user delay originate on the client\-side or server\-side?
 
-1. **Does the 6.84-second user delay originate on the client-side (frontend rendering) or server-side (backend TTFB)?**
-   - *Evidence from New Relic Browser timing:*
+**Evidence from New Relic Browser timing:**
 
-2. **Which backend segment in New Relic APM accounts for 99%+ of the server response time?**
-   - *Failing Component:*
-   - *Exclusive Duration:*
+The delay primarily originated on the **server side**.
 
-3. **How do the Splunk 504 logs correlate with the New Relic transaction trace findings?**
-   - *Correlation:*
+Out of the total **6840 ms** page\-load time, **5120 ms**, or approximately **74.85%**, was backend duration/TTFB.
+
+Frontend\-related processing consisted of:
+
+- DOM processing: 1120 ms
+- Page rendering: 540 ms
+
+Although frontend processing contributed to the overall page\-load time, it was substantially smaller than the backend wait.
+
+Therefore, backend response time was the dominant cause of the observed user delay.
+
+### 2\. Which backend segment accounts for 99%\+ of the server response time?
+
+- **Failing Component:** External: PaymentGatewayClient.charge
+- **Exclusive Duration:** 5080 ms
+- **Percentage Contribution:** 99.22%
+
+The external payment gateway client call was therefore the dominant backend bottleneck.
+
+### 3\. How do the Splunk 504 logs correlate with the New Relic transaction trace findings?
+
+**Correlation:**
+
+Splunk showed /checkout/payment failing with HTTP 504 responses at approximately:
+
+- **5240 ms**
+- **5190 ms**
+
+A subsequent HTTP 502 response occurred after **4980 ms**.
+
+New Relic recorded the checkout backend transaction at **5120 ms**, of which the external PaymentGatewayClient.charge call consumed **5080 ms**.
+
+The very similar approximately 5\-second durations strongly correlate the Splunk gateway failures with the slow external payment processing observed in New Relic APM.
+
+The observed failure sequence was:
+
+**Slow** **PaymentGatewayClient.charge** **→ Checkout backend waits approximately 5 seconds → Backend transaction becomes slow → HTTP 502/504 response → User experiences increased checkout page\-load time**
 
 ---
 
-## 6. Audit Recommendations & Monitoring Actions
-<!-- Provide 3 concrete recommendations for alerting and optimizing frontend/backend latency. -->
+## 6\. Audit Recommendations & Monitoring Actions
 
+### 1\. Optimize and Protect the External Payment Call
 
+Investigate PaymentGatewayClient.charge and the downstream payment provider because the operation consumed **5080 ms**, or **99.22%**, of the server transaction.
 
-{
-  "audit_metadata": {
-    "system_name": "Global Retail Web Platform",
-    "audit_scope": "Splunk Access Log Search & New Relic APM / Browser Timing Audit",
-    "investigation_period": "2026-11-16T08:00:00Z to 2026-11-16T08:30:00Z"
-  },
-  "splunk_log_index": {
-    "index_name": "web_prod",
-    "total_events_searched": 14500,
-    "sample_events": [
-      {
-        "_time": "2026-11-16T08:14:22Z",
-        "client_ip": "198.51.100.22",
-        "http_method": "GET",
-        "uri_path": "/products/catalog",
-        "status": 200,
-        "response_time_ms": 140,
-        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-      },
-      {
-        "_time": "2026-11-16T08:15:05Z",
-        "client_ip": "203.0.113.41",
-        "http_method": "POST",
-        "uri_path": "/checkout/payment",
-        "status": 504,
-        "response_time_ms": 5240,
-        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
-      },
-      {
-        "_time": "2026-11-16T08:15:32Z",
-        "client_ip": "192.0.2.89",
-        "http_method": "POST",
-        "uri_path": "/checkout/payment",
-        "status": 504,
-        "response_time_ms": 5190,
-        "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5)"
-      },
-      {
-        "_time": "2026-11-16T08:16:10Z",
-        "client_ip": "198.51.100.104",
-        "http_method": "GET",
-        "uri_path": "/user/profile",
-        "status": 200,
-        "response_time_ms": 95,
-        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-      },
-      {
-        "_time": "2026-11-16T08:16:45Z",
-        "client_ip": "203.0.113.112",
-        "http_method": "POST",
-        "uri_path": "/checkout/payment",
-        "status": 502,
-        "response_time_ms": 4980,
-        "user_agent": "Mozilla/5.0 (X11; Linux x86_64)"
-      }
-    ]
-  },
-  "newrelic_performance": {
-    "browser_timing": {
-      "page_url": "https://store.example.com/checkout",
-      "total_page_load_time_sec": 6.84,
-      "apdex_score": 0.41,
-      "timing_segments_ms": {
-        "dns_lookup_ms": 18,
-        "tcp_ssl_connection_ms": 42,
-        "backend_duration_wait_time_ms": 5120,
-        "dom_processing_ms": 1120,
-        "page_rendering_ms": 540
-      }
-    },
-    "apm_transaction_trace": {
-      "transaction_name": "WebTransaction/Custom/Checkout/SubmitOrder",
-      "total_duration_ms": 5120,
-      "segments": [
-        {
-          "segment_name": "Application: CheckoutController.submit",
-          "duration_ms": 5120,
-          "exclusive_duration_ms": 25,
-          "percent_contribution": 0.49
-        },
-        {
-          "segment_name": "External: PaymentGatewayClient.charge",
-          "duration_ms": 5080,
-          "exclusive_duration_ms": 5080,
-          "percent_contribution": 99.22
-        },
-        {
-          "segment_name": "Database: Postgres OrderRepository.save",
-          "duration_ms": 15,
-          "exclusive_duration_ms": 15,
-          "percent_contribution": 0.29
-        }
-      ]
-    }
-  }
-}
+Review:
+
+- HTTP client connection and read timeouts
+- Connection\-pool utilization
+- Retry configuration
+- Downstream provider latency
+- Circuit\-breaker configuration
+
+Use bounded retries with exponential backoff rather than repeatedly waiting on an unhealthy downstream dependency.
+
+A circuit breaker should prevent repeated long\-running payment calls when the external provider is consistently failing or timing out.
+
+### 2\. Configure Splunk Error Monitoring
+
+Create Splunk monitoring for /checkout/payment to detect increasing HTTP 5xx responses.
+
+Monitor specifically:
+
+- HTTP 502 count
+- HTTP 504 count
+- Response time
+- Failure rate by URI
+- Sudden increases compared with the normal baseline
+
+The investigation showed failures consistently occurring around the 5\-second range, so increases in /checkout/payment response times toward this level should be treated as a strong warning signal.
+
+### 3\. Configure New Relic APM and Browser Monitoring
+
+Configure New Relic monitoring for both backend and user\-facing performance.
+
+Monitor:
+
+- PaymentGatewayClient.charge duration
+- Checkout transaction P95/P99 latency
+- External\-service error rate
+- HTTP 5xx rate
+- Backend/TTFB duration
+- Checkout page\-load time
+- Browser Apdex
+
+Alert thresholds should be set well below the observed **5080 ms** external\-call latency so degradation can be detected before requests begin reaching the approximately 5\-second failure window. Final production thresholds should be aligned with the checkout service's defined SLO.
+
+---
+
+## Root Cause Summary
+
+The audit determined that the checkout performance problem was primarily **server\-side**.
+
+New Relic Browser monitoring showed that **5120 ms of the 6840 ms page\-load time** was spent waiting for the backend response.
+
+New Relic APM further isolated the backend delay to:
+
+External: PaymentGatewayClient.charge
+
+This operation consumed **5080 ms**, representing **99.22% of the backend transaction duration**.
+
+Splunk independently showed /checkout/payment returning HTTP **502/504** responses after approximately **4.98–5.24 seconds**, closely matching the New Relic APM timing.
+
+Therefore, the primary bottleneck was the **slow external payment\-gateway interaction**, which caused approximately 5\-second backend response times, gateway errors, and degraded checkout experience.
+
