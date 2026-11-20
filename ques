@@ -1,168 +1,208 @@
-# Procedure – RTEL\_Q04\_E: Dynatrace Smartscape Topology & PurePath Analysis
-
-### Step 1: Reviewed the Dynatrace Assessment Data
-
-Opened the provided dynatrace\_smartscape\_purepath.json dataset and reviewed the production investigation details.
-
-The investigation was for a memory\-related production issue in OrderProcessingService in the production\-us\-east environment.
-
-### Step 2: Reviewed the Smartscape Topology
-
-Inspected the 5\-tier Smartscape topology to understand how the application components were connected.
-
-The following tiers were analyzed:
-
-**Application → Service → Process Group → Host → Datacenter**
-
-This helped identify where the problem was occurring and which underlying infrastructure components were affected.
-
-### Step 3: Checked the Application Health
-
-Analyzed the application\-level information.
-
-The Enterprise E\-Commerce Storefront application showed a **CRITICAL** health status with an **Apdex score of 0.42**.
-
-The low Apdex score indicated significant degradation in the user\-facing application experience.
-
-### Step 4: Identified the Bottleneck Service
-
-Reviewed the services in the Smartscape topology and identified OrderProcessingService as the degraded service.
-
-The service was running on **Spring Boot 3.1.2** and had a maximum JVM heap size of **4096 MB**.
-
-The JVM was already using **4012 MB**, giving a heap saturation of **97.9%**.
-
-This showed that the Java heap was almost completely exhausted.
-
-### Step 5: Checked the Process Group
-
-Traced the affected service to the underlying process group.
-
-The service was associated with:
-
-OrderServices Java Process Group
-
-The process group was running **Java 17 using OpenJDK HotSpot** and had a **CRITICAL** health status.
-
-This confirmed that the memory problem was affecting the Java runtime hosting the service.
-
-### Step 6: Checked the Host Resource Utilization
-
-Analyzed the host supporting the affected process group.
-
-The host was:
-
-prod\-app\-worker\-01.ec2.internal
-
-The system was running **Linux 5.15.0** with:
-
-- Total memory: **32 GB**
-- Used memory: **30.8 GB**
-- Memory utilization: approximately **96.25%**
-
-The host was therefore also in a **CRITICAL** state.
-
-### Step 7: Checked the Datacenter Health
-
-Reviewed the highest Smartscape infrastructure tier.
-
-AWS us\-east\-1 remained **HEALTHY**.
-
-This helped narrow the issue to the application/service/host stack rather than a general datacenter\-level failure.
-
-### Step 8: Opened the PurePath Trace
-
-Analyzed the PurePath trace:
-
-PP\-9821410294\-819
-
-The affected request was:
-
-POST /api/v2/orders/checkout
-
-The complete request took **3150 ms** and ended with:
-
-java.lang.OutOfMemoryError: Java heap space
-
-### Step 9: Followed the PurePath Call Tree
-
-Followed the execution path through the application:
-
-DispatcherServlet.doDispatch
-
-→ OrderCheckoutController.processCheckout
-
-→ OrderServiceImpl.createAndCacheOrder
-
-→ OrderCache.addToCache
-
-This allowed the failure to be narrowed from the incoming web request down to the exact application method responsible for the memory issue.
-
-### Step 10: Identified the Failing Method
-
-The failure was isolated to:
-
-**Class:** com.enterprise.order.cache.OrderCache
-
-**Method:** addToCache
-
-The method executed for approximately **2850 ms** before the request failed.
-
-The exception generated was:
-
-java.lang.OutOfMemoryError: Java heap space
-
-### Step 11: Determined the Root Cause
-
-The PurePath details showed that the application used a **static unbounded** **ConcurrentHashMap** to store OrderSession tokens.
-
-Because the cache had no effective size limit or eviction mechanism, entries continued accumulating in JVM heap memory.
-
-The sequence of the problem was:
-
-**OrderSession entries accumulate → Unbounded cache grows → JVM heap reaches 97.9% → Java heap is exhausted → OutOfMemoryError → Order checkout requests fail**
-
-This identified the application cache implementation as the root cause rather than simply a lack of infrastructure resources.
-
-### Step 12: Defined the Application\-Level Remediation
-
-Recommended replacing the static unbounded ConcurrentHashMap with a bounded cache implementation such as **Caffeine**.
-
-The cache should have:
-
-- Maximum size limits
-- Expiration/TTL
-- Automatic eviction
-- Appropriate cleanup behavior
-
-This prevents OrderSession objects from remaining in memory indefinitely.
-
-### Step 13: Defined Dynatrace Monitoring Improvements
-
-Recommended configuring Dynatrace/Davis AI monitoring around JVM memory behavior.
-
-Important signals include:
-
-- JVM heap utilization
-- Garbage collection behavior
-- Memory growth
-- OutOfMemoryError occurrences
-- Service failure rate
-- Response\-time degradation
-
-For example, JVM heap utilization remaining above roughly **85–90%** should be treated as an early warning requiring investigation before complete heap exhaustion occurs.
-
-### Step 14: Defined Infrastructure and Container Memory Controls
-
-Recommended defining appropriate JVM and container memory limits and maintaining sufficient headroom between JVM maximum heap and the container/host memory limit.
-
-Memory monitoring should cover both the Java application and the underlying host so that increasing heap consumption can be detected before it causes an outage.
-
-### Result
-
-The Smartscape analysis showed the relationship between the degraded application, OrderProcessingService, Java process group and critically utilized host.
-
-PurePath then narrowed the failure to OrderCache.addToCache, where an unbounded static ConcurrentHashMap caused continuous OrderSession accumulation.
-
-The investigation therefore identified an **application\-level memory leak leading to JVM heap exhaustion and** **java.lang.OutOfMemoryError** as the root cause of the production issue.
-
+# Observability Lab: Datadog APM & Service Map Flow Investigation
+
+## 1. Investigation Summary & Topology Context
+<!-- Briefly summarize the Datadog incident, the service triggering the alert, and overall transaction flow. -->
+
+
+---
+
+## 2. Datadog Service Map Dependency Analysis
+
+Complete the service map dependency table based on `datadog_apm_servicemap.json`:
+
+| Service Name | Service Type / Engine | Throughput (RPM) | Error Rate (%) | Latency P95 (ms) | Status |
+|---|---|---|---|---|---|
+| `web-storefront` | | | | | |
+| `checkout-service` | | | | | |
+| `payment-api` | | | | | |
+| `postgres-payment-db` | | | | | |
+| `stripe-external-gateway` | | | | | |
+
+### Service Map Dependency Traversal:
+- **Upstream Callers of `payment-api`:**
+- **Downstream Dependencies of `payment-api`:**
+- **Propagation of Error Rates:** Explain how database errors in `postgres-payment-db` cascade upward through `payment-api` into `checkout-service`:
+
+---
+
+## 3. APM Trace & Flame Graph Breakdown
+
+Analyze the APM flame graph trace (`trace_id: dd-88491029141`) to inspect span execution times:
+
+| Span ID | Service Name | Resource / SQL Statement | Start (ms) | Duration (ms) | % of Trace Latency | Error Flag (0 / 1) |
+|---|---|---|---|---|---|---|
+| `span-dd-01` | | | | | | |
+| `span-dd-02` | | | | | | |
+| `span-dd-03` | | | | | | |
+| `span-dd-04` | | | | | | |
+
+---
+
+## 4. Root Cause & Database Bottleneck Diagnosis
+
+Answer the following diagnostic questions based on your findings:
+
+1. **Which specific database query is responsible for 97%+ of the total request latency?**
+   - *SQL Statement:*
+   - *Duration (ms):*
+   - *Error Type & Message:*
+
+2. **Why is the database query blocking (refer to connection count and lock wait queue)?**
+   - *PostgreSQL Connection Pool Status:*
+   - *Row Lock Contention (`FOR UPDATE` clause impact):*
+
+3. **Did the external Stripe payment gateway contribute to this outage? Cite its latency and error rate:**
+   - *Stripe Latency:*
+   - *Stripe Error Rate:*
+   - *Conclusion:*
+
+---
+
+## 5. Architectural Remediation & Observability Recommendations
+<!-- Provide 3 concrete engineering fixes (e.g., query optimization, non-blocking locks, connection pooling, Datadog monitor threshold alerts). -->
+
+
+
+{
+  "question_code": "RTEL_Q05_E",
+  "problem_code": "rtel_datadog_apm_servicemap",
+  "exam_code": "p1d9"
+}
+
+
+{
+  "investigation_metadata": {
+    "platform": "Datadog APM & Distributed Tracing",
+    "service_name": "payment-api",
+    "environment": "production",
+    "time_window": "Last 15 minutes",
+    "investigation_focus": "Elevated error rate (14.2%) and P99 latency spike (4,850ms)"
+  },
+  "service_map": {
+    "description": "Datadog automated topology map representing upstream and downstream service dependencies.",
+    "nodes": [
+      {
+        "service": "web-storefront",
+        "type": "web",
+        "language": "nodejs",
+        "rpm": 12000,
+        "error_rate_percent": 3.8,
+        "latency_p95_ms": 520,
+        "status": "WARNING"
+      },
+      {
+        "service": "checkout-service",
+        "type": "api",
+        "language": "java",
+        "rpm": 4500,
+        "error_rate_percent": 9.4,
+        "latency_p95_ms": 2800,
+        "status": "DEGRADED"
+      },
+      {
+        "service": "payment-api",
+        "type": "api",
+        "language": "python-fastapi",
+        "rpm": 1800,
+        "error_rate_percent": 14.2,
+        "latency_p95_ms": 4850,
+        "status": "CRITICAL"
+      },
+      {
+        "service": "postgres-payment-db",
+        "type": "database",
+        "engine": "PostgreSQL 15.3",
+        "active_connections": 98,
+        "max_connections": 100,
+        "lock_wait_queue": 34,
+        "status": "CRITICAL"
+      },
+      {
+        "service": "stripe-external-gateway",
+        "type": "third-party",
+        "rpm": 1600,
+        "error_rate_percent": 0.2,
+        "latency_p95_ms": 110,
+        "status": "HEALTHY"
+      }
+    ],
+    "edges": [
+      {
+        "from": "web-storefront",
+        "to": "checkout-service",
+        "call_rate_rpm": 4500,
+        "error_percent": 9.4
+      },
+      {
+        "from": "checkout-service",
+        "to": "payment-api",
+        "call_rate_rpm": 1800,
+        "error_percent": 14.2
+      },
+      {
+        "from": "payment-api",
+        "to": "postgres-payment-db",
+        "call_rate_rpm": 3600,
+        "error_percent": 18.0
+      },
+      {
+        "from": "payment-api",
+        "to": "stripe-external-gateway",
+        "call_rate_rpm": 1600,
+        "error_percent": 0.2
+      }
+    ]
+  },
+  "apm_flame_graph": {
+    "trace_id": "dd-88491029141",
+    "root_resource": "POST /api/v1/payments/process",
+    "total_duration_ms": 5120,
+    "http_status_code": 500,
+    "error_message": "QueryTimeout: Lock wait timeout exceeded; try restarting transaction",
+    "spans": [
+      {
+        "span_id": "span-dd-01",
+        "service": "payment-api",
+        "resource": "POST /api/v1/payments/process",
+        "operation": "fastapi.request",
+        "start_ms": 0,
+        "duration_ms": 5120,
+        "error": 1
+      },
+      {
+        "span_id": "span-dd-02",
+        "service": "payment-api",
+        "resource": "validate_customer_wallet",
+        "operation": "function.call",
+        "start_ms": 5,
+        "duration_ms": 25,
+        "error": 0
+      },
+      {
+        "span_id": "span-dd-03",
+        "service": "payment-api",
+        "resource": "SELECT * FROM payment_accounts WHERE account_id = ? FOR UPDATE",
+        "operation": "postgres.query",
+        "start_ms": 32,
+        "duration_ms": 5008,
+        "error": 1,
+        "meta": {
+          "db.system": "postgresql",
+          "db.name": "payments_prod",
+          "db.statement": "SELECT * FROM payment_accounts WHERE account_id = ? FOR UPDATE",
+          "error.type": "psycopg2.errors.QueryCanceled",
+          "error.msg": "canceling statement due to statement timeout (5000ms)"
+        }
+      },
+      {
+        "span_id": "span-dd-04",
+        "service": "payment-api",
+        "resource": "stripe_external_authorize",
+        "operation": "http.client",
+        "start_ms": 5045,
+        "duration_ms": 70,
+        "error": 0
+      }
+    ]
+  }
+}
