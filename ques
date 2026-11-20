@@ -1,92 +1,183 @@
-# Observability Lab: MELT Telemetry Data Triage & Framework Analysis
+# Dynatrace Smartscape Topology & PurePath Analysis Report
 
-## 1. Incident Overview & Operational Scope
+## 1. Smartscape Topology Health Audit
 
-Incident `INC-84920` was a SEV-1 production outage affecting the `checkout-service` in the E-Commerce Checkout & Payment Platform. The incident started at `14:02:15 UTC` immediately after version `v2.4.1` was deployed and was resolved at `14:20:30 UTC`, lasting approximately 18.25 minutes.
+Based on your inspection of `dynatrace_smartscape_purepath.json`, document the health status and resource metrics across the 5-tier Smartscape model:
 
-During the incident, checkout P99 latency increased from a normal level of approximately 215–228 ms to a peak of 6450 ms. The checkout HTTP error rate increased from approximately 0.12–0.15% to 22.40%. Checkout throughput dropped from 435 requests per second to 260 requests per second.
-
-The outage was caused by a database connection leak in the new loyalty discount module. The leaked connections exhausted the 50-connection HikariCP database pool, causing requests to wait for connections and eventually fail with HTTP 500 errors.
-
-The incident was resolved by rolling back `checkout-service` from version `v2.4.1` to the stable version `v2.4.0`.
-
----
-
-## 2. MELT Telemetry Classification Matrix
-
-| Signal Description | MELT Classification (Metric / Event / Log / Trace) | Primary Data Format / Structure | Key Characteristics (Aggregation / Context / Breadth) | Storage & Retention Trade-off (Low / Med / High Cost) |
+| Smartscape Tier | Entity Name / Identifier | Technology / OS / Framework | Health Status (HEALTHY / WARNING / CRITICAL) | Key Performance / Saturation Metric |
 |---|---|---|---|---|
-| HTTP 500 error rate percentage over time | Metric | Numeric time-series data | Aggregated percentage, low individual-request context, broad service-health visibility | Low |
-| Deployment rollout completed notification (`v2.4.1`) | Event | Structured timestamped event record with metadata | Records a discrete state change with deployment version, image and rollout status | Low |
-| Distributed request span waterfall (`/api/v1/checkout`) | Trace | Parent-child span hierarchy with timestamps, durations and tags | Provides detailed request flow across services, high context and request-level visibility | High |
-| Stack trace: `SQLTransientConnectionException` | Log | Timestamped structured textual record containing exception details | Detailed application context, exception class, root-cause message and source location | Medium |
-| P99 response latency time series | Metric | Numeric time-series data | Aggregated percentile measurement showing service performance over time | Low |
-| Kubernetes Horizontal Pod Autoscaler scaling from 5 to 10 replicas | Event | Structured timestamped event with scaling metadata | Discrete infrastructure state change containing previous and new replica counts | Low |
-| HikariCP connection acquisition latency warning message | Log | Timestamped textual record with severity and execution context | Contains request-level context such as thread, trace ID and measured connection wait time | Medium |
-| Database connection pool active connection count (`50/50`) | Metric | Numeric time-series gauge | Aggregated resource-utilization measurement showing pool saturation | Low |
-| Parent-child span hierarchy linking Gateway, Checkout and DB | Trace | Distributed trace containing linked spans and parent span IDs | End-to-end request visibility across service boundaries with detailed latency attribution | High |
-| Prometheus alert rule firing (`CheckoutServiceHighLatencyP99`) | Event | Structured alert event containing threshold and observed value | Discrete operational occurrence that records when a monitoring condition was triggered | Low |
+| **Application** | | | | |
+| **Service** | | | | |
+| **Process Group** | | | | |
+| **Host** | | | | |
+| **Datacenter** | | | | |
+
+### Specific Tier Saturation Questions:
+1. **Which application is experiencing user-facing degradation, and what is its Apdex score?**
+   - *Application Name & ID:* 
+   - *Apdex Score:* 
+   - *Impact Assessment:* 
+
+2. **Which service is the primary bottleneck, and what are its memory consumption metrics?**
+   - *Service Name & ID:* 
+   - *Framework:* 
+   - *JVM Heap Used vs. Max Heap (MB):* 
+   - *Heap Saturation Percentage:* 
+
+3. **Identify the underlying host and process group hosting the degraded service:**
+   - *Host Name & ID:* 
+   - *Host Memory Used vs. Total (GB):* 
+   - *Process Group Name & ID:* 
+   - *Technology Stack:* 
 
 ---
 
-## 3. Telemetry Source Selection & Incident Triage Strategy
+## 2. Dynatrace PurePath Code-Level Trace Breakdown
 
-### Recommended Triage Sequence
+Analyze the PurePath trace (`PP-9821410294-819`) to evaluate the execution call tree and identify the root cause exception:
 
-1. **Stage 1 – Detection & Broad Impact Assessment**
-   - **Pillar:** Metrics
-   - **Rationale:** Metrics should be checked first because they quickly show the incident's start time, severity and overall business impact. The P99 latency increased from 228 ms at `14:00 UTC` to 1450 ms at `14:03 UTC`, eventually reaching 6450 ms. The error rate increased from 0.15% to 22.40%, while throughput fell from 435 to 260 requests per second. These measurements immediately confirm a serious production degradation.
+### PurePath Call Tree Breakdown:
+| Step | Class Name | Method Name | Duration (ms) | Error? (YES / NO) | Exception / Error Details |
+|---|---|---|---|---|---|
+| 1 | | | | | |
+| 2 | | | | | |
+| 3 | | | | | |
+| 4 | | | | | |
 
-2. **Stage 2 – Correlating System & Infrastructure Changes**
-   - **Pillar:** Events
-   - **Rationale:** Events reveal what operational change happened near the beginning of the incident. The `v2.4.1` deployment completed at `14:02:15 UTC`, immediately before the first degraded metric sample at `14:03 UTC`. The event timeline also records the alerts, unsuccessful autoscaling action and final rollback to `v2.4.0`.
+### Diagnostic Findings:
+1. **Trace Overview:**
+   - *Trace ID:* 
+   - *Entry Point (HTTP Method & URI):* 
+   - *Total Request Duration:* 
+   - *Top-Level Error Message:* 
 
-3. **Stage 3 – Isolating the Failing Request Path**
-   - **Pillar:** Traces
-   - **Rationale:** Traces identify which service and operation consumed most of the request duration. Trace `tr-9f8e7d6c5b` shows that authentication and inventory operations completed successfully, while `LoyaltyDiscountService.applyPromotionalVoucher` consumed 5104 ms of the total 5184 ms request. Its child database span spent 5002 ms waiting to acquire a connection.
-
-4. **Stage 4 – Identifying Code Defect & Stack Trace**
-   - **Pillar:** Logs
-   - **Rationale:** Logs provide the exact exception, source method and implementation defect. The application logs show a `java.sql.SQLTransientConnectionException` caused by database connection pool exhaustion. The error originated from `LoyaltyDiscountService.applyPromotionalVoucher` at line 114. The new discount-calculation path opened a database connection without properly closing it when a promotional code matched.
-
----
-
-## 4. Checkout Incident Data Analysis & Root Cause Diagnosis
-
-### A. Metric & Event Correlation
-
-1. **What time did the P99 latency and HTTP 500 error rate start degrading?**
-   - **Observed Timestamp:** `14:03:00 UTC`
-   - **Pre-incident P99 vs Peak P99:** P99 latency was 228 ms at `14:00 UTC` and reached a peak of 6450 ms at `14:10 UTC`.
-   - **Pre-incident Error Rate vs Peak Error Rate:** The error rate was 0.15% at `14:00 UTC` and reached a peak of 22.40% at `14:10 UTC`.
-
-2. **What specific deployment event correlates with the onset of the outage?**
-   - **Event ID & Timestamp:** `EVT-1002` at `2026-11-14T14:02:15Z`
-   - **Target Image / Version Deployed:** `registry.internal/checkout-service:v2.4.1`
-   - **Git Commit & Feature Summary:** Git commit `a7b8c9d1` added the promotional loyalty discount calculator and seasonal voucher engine.
-
-3. **Why did the automated scaling event fail to resolve the outage?**
-   - **Explanation:** The outage was not caused by high CPU utilization or insufficient checkout-service pod capacity. CPU utilization remained relatively stable, reaching only 41.2% at `14:06 UTC` and falling to 38.0% at `14:10 UTC`. The actual bottleneck was the shared database connection pool, which reached its maximum capacity of 50 active connections. The database wait queue increased from 8 at `14:03 UTC` to 154 at `14:10 UTC`. Scaling the service from 5 to 10 pods did not close the leaked database connections or increase the available database connections. Additional pods could also create more connection requests, so horizontal scaling could not resolve the connection pool exhaustion.
-
-### B. Distributed Trace & Log Root Cause Isolation
-
-1. **In the sampled distributed trace (`tr-9f8e7d6c5b`), which specific span consumed 96%+ of the total request duration?**
-   - **Span ID & Operation Name:** `span-005` — `LoyaltyDiscountService.applyPromotionalVoucher`
-   - **Span Duration vs Total Duration:** 5104 ms out of the total 5184 ms, approximately 98.46% of the complete request duration.
-   - **Failing Downstream Component:** The failing downstream component was `postgres-checkout-db`, specifically the `HikariCP.acquireConnection` operation in `span-006`. The connection-acquisition span lasted 5002 ms before timing out.
-
-2. **According to the application logs, what was the exact exception thrown and the underlying code defect?**
-   - **Exception Class:** `java.sql.SQLTransientConnectionException`
-   - **Root Cause Message:** `Connection is not available, request timed out after 5000ms (total=50, active=50, idle=0, waiting=74).`
-   - **Originating Source File & Line Number:** `LoyaltyDiscountService.java:114`, in `LoyaltyDiscountService.applyPromotionalVoucher`.
-   - **Defect Explanation:** The new `calculateSeasonalDiscount()` logic opened a database connection but did not use a `try-with-resources` block. When a promotional code matched, the connection was not closed and returned to the HikariCP pool. Repeated checkout requests leaked connections until all 50 connections became active, leaving zero idle connections. New checkout requests then waited for connections and failed after the 5000 ms timeout.
+2. **Root Cause Class & Method:**
+   - *Failing Class Name:* 
+   - *Failing Method Name:* 
+   - *Execution Duration in Method (ms):* 
+   - *Exact Exception Thrown:* 
+   - *Code Vulnerability / Defect Detail (why heap memory was exhausted):* 
 
 ---
 
-## 5. Summary & Operational Telemetry Best Practices
+## 3. Remediation & Configuration Recommendations
 
-1. **Correlate all four MELT pillars using common identifiers and timestamps.** Metrics identified the outage and quantified its impact, events connected the degradation to the `v2.4.1` deployment, traces isolated the slow loyalty discount operation, and logs identified the exact exception and defective source location. Shared trace IDs, service versions and UTC timestamps make this correlation faster.
+<!-- Provide 3 concrete engineering recommendations to resolve the memory leak and prevent future outages: -->
+1. **Application Code / Cache Replacement:**
+   - *Recommendation:* 
 
-2. **Monitor database connection pool saturation, not only CPU and memory.** Monitoring should include active, idle and maximum connections, connection-acquisition latency, timeout count and waiting-thread count. Alerts should fire before the pool reaches complete exhaustion. For a pool maximum of 50, warning alerts could be configured at 80% utilization, or 40 active connections, and critical alerts at 90%, or 45 active connections, especially when the wait queue is increasing.
+2. **Dynatrace Davis AI Anomaly Detection & Alerting:**
+   - *Recommendation:* 
 
-3. **Strengthen canary deployment verification and automatic rollback controls.** Version `v2.4.1` should first be released to a small percentage of traffic. The deployment pipeline should compare P99 latency, HTTP 5xx rate, database pool utilization and connection wait queue against the stable version. A sustained P99 latency above 3000 ms, HTTP 5xx rate above 5%, or rapidly increasing database connection wait queue should automatically stop the rollout and trigger rollback. Automated tests should also verify that database connections are closed on successful, failure and early-return code paths.
+3. **Infrastructure & Container Memory Governance:**
+   - *Recommendation:* 
+{
+  "metadata": {
+    "platform": "Dynatrace OneAgent & Davis AI",
+    "investigation_id": "DYN-PROBLEM-78419",
+    "title": "Memory leak leading to OutOfMemoryError in OrderProcessingService",
+    "environment": "production-us-east",
+    "time_window": "Last 30 minutes"
+  },
+  "smartscape_topology": {
+    "datacenter": {
+      "id": "DC-EAST-1",
+      "name": "AWS us-east-1",
+      "status": "HEALTHY"
+    },
+    "hosts": [
+      {
+        "host_id": "HOST-99A1",
+        "name": "prod-app-worker-01.ec2.internal",
+        "os": "Linux 5.15.0",
+        "cpu_cores": 8,
+        "memory_total_gb": 32,
+        "memory_used_gb": 30.8,
+        "status": "CRITICAL"
+      }
+    ],
+    "process_groups": [
+      {
+        "group_id": "PG-JAVA-ORDER",
+        "name": "OrderServices Java Process Group",
+        "technology": "Java 17 (OpenJDK HotSpot)",
+        "process_count": 2,
+        "status": "CRITICAL"
+      }
+    ],
+    "services": [
+      {
+        "service_id": "SERVICE-88A92",
+        "name": "OrderProcessingService",
+        "web_framework": "Spring Boot 3.1.2",
+        "jvm_heap_max_mb": 4096,
+        "jvm_heap_used_mb": 4012,
+        "heap_saturation_percent": 97.9,
+        "status": "CRITICAL",
+        "upstream_services": [
+          "API-Gateway-Service"
+        ],
+        "downstream_services": [
+          "PaymentService",
+          "InventoryDatabase"
+        ]
+      }
+    ],
+    "applications": [
+      {
+        "app_id": "APP-STOREFRONT",
+        "name": "Enterprise E-Commerce Storefront",
+        "apdex": 0.42,
+        "status": "CRITICAL"
+      }
+    ]
+  },
+  "purepath_trace": {
+    "trace_id": "PP-9821410294-819",
+    "root_service": "OrderProcessingService",
+    "entry_point": "POST /api/v2/orders/checkout",
+    "total_duration_ms": 3150,
+    "error": true,
+    "error_message": "java.lang.OutOfMemoryError: Java heap space",
+    "call_tree": [
+      {
+        "step": 1,
+        "class": "org.springframework.web.servlet.DispatcherServlet",
+        "method": "doDispatch",
+        "duration_ms": 3150,
+        "error": true
+      },
+      {
+        "step": 2,
+        "class": "com.enterprise.order.controller.OrderCheckoutController",
+        "method": "processCheckout",
+        "duration_ms": 3145,
+        "error": true
+      },
+      {
+        "step": 3,
+        "class": "com.enterprise.order.service.OrderServiceImpl",
+        "method": "createAndCacheOrder",
+        "duration_ms": 3130,
+        "error": true
+      },
+      {
+        "step": 4,
+        "class": "com.enterprise.order.cache.OrderCache",
+        "method": "addToCache",
+        "duration_ms": 2850,
+        "error": true,
+        "exception": "java.lang.OutOfMemoryError: Java heap space",
+        "details": "Static unbounded ConcurrentHashMap storing OrderSession tokens exceeded 4GB heap space."
+      }
+    ]
+  }
+}
+
+
+
+{
+  "question_code": "RTEL_Q04_E",
+  "problem_code": "rtel_dynatrace_purepath_navigation",
+  "exam_code": "p1d9"
+}
