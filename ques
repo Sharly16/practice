@@ -1,183 +1,168 @@
-# Dynatrace Smartscape Topology & PurePath Analysis Report
+# Procedure – RTEL\_Q04\_E: Dynatrace Smartscape Topology & PurePath Analysis
 
-## 1. Smartscape Topology Health Audit
+### Step 1: Reviewed the Dynatrace Assessment Data
 
-Based on your inspection of `dynatrace_smartscape_purepath.json`, document the health status and resource metrics across the 5-tier Smartscape model:
+Opened the provided dynatrace\_smartscape\_purepath.json dataset and reviewed the production investigation details.
 
-| Smartscape Tier | Entity Name / Identifier | Technology / OS / Framework | Health Status (HEALTHY / WARNING / CRITICAL) | Key Performance / Saturation Metric |
-|---|---|---|---|---|
-| **Application** | | | | |
-| **Service** | | | | |
-| **Process Group** | | | | |
-| **Host** | | | | |
-| **Datacenter** | | | | |
+The investigation was for a memory\-related production issue in OrderProcessingService in the production\-us\-east environment.
 
-### Specific Tier Saturation Questions:
-1. **Which application is experiencing user-facing degradation, and what is its Apdex score?**
-   - *Application Name & ID:* 
-   - *Apdex Score:* 
-   - *Impact Assessment:* 
+### Step 2: Reviewed the Smartscape Topology
 
-2. **Which service is the primary bottleneck, and what are its memory consumption metrics?**
-   - *Service Name & ID:* 
-   - *Framework:* 
-   - *JVM Heap Used vs. Max Heap (MB):* 
-   - *Heap Saturation Percentage:* 
+Inspected the 5\-tier Smartscape topology to understand how the application components were connected.
 
-3. **Identify the underlying host and process group hosting the degraded service:**
-   - *Host Name & ID:* 
-   - *Host Memory Used vs. Total (GB):* 
-   - *Process Group Name & ID:* 
-   - *Technology Stack:* 
+The following tiers were analyzed:
 
----
+**Application → Service → Process Group → Host → Datacenter**
 
-## 2. Dynatrace PurePath Code-Level Trace Breakdown
+This helped identify where the problem was occurring and which underlying infrastructure components were affected.
 
-Analyze the PurePath trace (`PP-9821410294-819`) to evaluate the execution call tree and identify the root cause exception:
+### Step 3: Checked the Application Health
 
-### PurePath Call Tree Breakdown:
-| Step | Class Name | Method Name | Duration (ms) | Error? (YES / NO) | Exception / Error Details |
-|---|---|---|---|---|---|
-| 1 | | | | | |
-| 2 | | | | | |
-| 3 | | | | | |
-| 4 | | | | | |
+Analyzed the application\-level information.
 
-### Diagnostic Findings:
-1. **Trace Overview:**
-   - *Trace ID:* 
-   - *Entry Point (HTTP Method & URI):* 
-   - *Total Request Duration:* 
-   - *Top-Level Error Message:* 
+The Enterprise E\-Commerce Storefront application showed a **CRITICAL** health status with an **Apdex score of 0.42**.
 
-2. **Root Cause Class & Method:**
-   - *Failing Class Name:* 
-   - *Failing Method Name:* 
-   - *Execution Duration in Method (ms):* 
-   - *Exact Exception Thrown:* 
-   - *Code Vulnerability / Defect Detail (why heap memory was exhausted):* 
+The low Apdex score indicated significant degradation in the user\-facing application experience.
 
----
+### Step 4: Identified the Bottleneck Service
 
-## 3. Remediation & Configuration Recommendations
+Reviewed the services in the Smartscape topology and identified OrderProcessingService as the degraded service.
 
-<!-- Provide 3 concrete engineering recommendations to resolve the memory leak and prevent future outages: -->
-1. **Application Code / Cache Replacement:**
-   - *Recommendation:* 
+The service was running on **Spring Boot 3.1.2** and had a maximum JVM heap size of **4096 MB**.
 
-2. **Dynatrace Davis AI Anomaly Detection & Alerting:**
-   - *Recommendation:* 
+The JVM was already using **4012 MB**, giving a heap saturation of **97.9%**.
 
-3. **Infrastructure & Container Memory Governance:**
-   - *Recommendation:* 
-{
-  "metadata": {
-    "platform": "Dynatrace OneAgent & Davis AI",
-    "investigation_id": "DYN-PROBLEM-78419",
-    "title": "Memory leak leading to OutOfMemoryError in OrderProcessingService",
-    "environment": "production-us-east",
-    "time_window": "Last 30 minutes"
-  },
-  "smartscape_topology": {
-    "datacenter": {
-      "id": "DC-EAST-1",
-      "name": "AWS us-east-1",
-      "status": "HEALTHY"
-    },
-    "hosts": [
-      {
-        "host_id": "HOST-99A1",
-        "name": "prod-app-worker-01.ec2.internal",
-        "os": "Linux 5.15.0",
-        "cpu_cores": 8,
-        "memory_total_gb": 32,
-        "memory_used_gb": 30.8,
-        "status": "CRITICAL"
-      }
-    ],
-    "process_groups": [
-      {
-        "group_id": "PG-JAVA-ORDER",
-        "name": "OrderServices Java Process Group",
-        "technology": "Java 17 (OpenJDK HotSpot)",
-        "process_count": 2,
-        "status": "CRITICAL"
-      }
-    ],
-    "services": [
-      {
-        "service_id": "SERVICE-88A92",
-        "name": "OrderProcessingService",
-        "web_framework": "Spring Boot 3.1.2",
-        "jvm_heap_max_mb": 4096,
-        "jvm_heap_used_mb": 4012,
-        "heap_saturation_percent": 97.9,
-        "status": "CRITICAL",
-        "upstream_services": [
-          "API-Gateway-Service"
-        ],
-        "downstream_services": [
-          "PaymentService",
-          "InventoryDatabase"
-        ]
-      }
-    ],
-    "applications": [
-      {
-        "app_id": "APP-STOREFRONT",
-        "name": "Enterprise E-Commerce Storefront",
-        "apdex": 0.42,
-        "status": "CRITICAL"
-      }
-    ]
-  },
-  "purepath_trace": {
-    "trace_id": "PP-9821410294-819",
-    "root_service": "OrderProcessingService",
-    "entry_point": "POST /api/v2/orders/checkout",
-    "total_duration_ms": 3150,
-    "error": true,
-    "error_message": "java.lang.OutOfMemoryError: Java heap space",
-    "call_tree": [
-      {
-        "step": 1,
-        "class": "org.springframework.web.servlet.DispatcherServlet",
-        "method": "doDispatch",
-        "duration_ms": 3150,
-        "error": true
-      },
-      {
-        "step": 2,
-        "class": "com.enterprise.order.controller.OrderCheckoutController",
-        "method": "processCheckout",
-        "duration_ms": 3145,
-        "error": true
-      },
-      {
-        "step": 3,
-        "class": "com.enterprise.order.service.OrderServiceImpl",
-        "method": "createAndCacheOrder",
-        "duration_ms": 3130,
-        "error": true
-      },
-      {
-        "step": 4,
-        "class": "com.enterprise.order.cache.OrderCache",
-        "method": "addToCache",
-        "duration_ms": 2850,
-        "error": true,
-        "exception": "java.lang.OutOfMemoryError: Java heap space",
-        "details": "Static unbounded ConcurrentHashMap storing OrderSession tokens exceeded 4GB heap space."
-      }
-    ]
-  }
-}
+This showed that the Java heap was almost completely exhausted.
 
+### Step 5: Checked the Process Group
 
+Traced the affected service to the underlying process group.
 
-{
-  "question_code": "RTEL_Q04_E",
-  "problem_code": "rtel_dynatrace_purepath_navigation",
-  "exam_code": "p1d9"
-}
+The service was associated with:
+
+OrderServices Java Process Group
+
+The process group was running **Java 17 using OpenJDK HotSpot** and had a **CRITICAL** health status.
+
+This confirmed that the memory problem was affecting the Java runtime hosting the service.
+
+### Step 6: Checked the Host Resource Utilization
+
+Analyzed the host supporting the affected process group.
+
+The host was:
+
+prod\-app\-worker\-01.ec2.internal
+
+The system was running **Linux 5.15.0** with:
+
+- Total memory: **32 GB**
+- Used memory: **30.8 GB**
+- Memory utilization: approximately **96.25%**
+
+The host was therefore also in a **CRITICAL** state.
+
+### Step 7: Checked the Datacenter Health
+
+Reviewed the highest Smartscape infrastructure tier.
+
+AWS us\-east\-1 remained **HEALTHY**.
+
+This helped narrow the issue to the application/service/host stack rather than a general datacenter\-level failure.
+
+### Step 8: Opened the PurePath Trace
+
+Analyzed the PurePath trace:
+
+PP\-9821410294\-819
+
+The affected request was:
+
+POST /api/v2/orders/checkout
+
+The complete request took **3150 ms** and ended with:
+
+java.lang.OutOfMemoryError: Java heap space
+
+### Step 9: Followed the PurePath Call Tree
+
+Followed the execution path through the application:
+
+DispatcherServlet.doDispatch
+
+→ OrderCheckoutController.processCheckout
+
+→ OrderServiceImpl.createAndCacheOrder
+
+→ OrderCache.addToCache
+
+This allowed the failure to be narrowed from the incoming web request down to the exact application method responsible for the memory issue.
+
+### Step 10: Identified the Failing Method
+
+The failure was isolated to:
+
+**Class:** com.enterprise.order.cache.OrderCache
+
+**Method:** addToCache
+
+The method executed for approximately **2850 ms** before the request failed.
+
+The exception generated was:
+
+java.lang.OutOfMemoryError: Java heap space
+
+### Step 11: Determined the Root Cause
+
+The PurePath details showed that the application used a **static unbounded** **ConcurrentHashMap** to store OrderSession tokens.
+
+Because the cache had no effective size limit or eviction mechanism, entries continued accumulating in JVM heap memory.
+
+The sequence of the problem was:
+
+**OrderSession entries accumulate → Unbounded cache grows → JVM heap reaches 97.9% → Java heap is exhausted → OutOfMemoryError → Order checkout requests fail**
+
+This identified the application cache implementation as the root cause rather than simply a lack of infrastructure resources.
+
+### Step 12: Defined the Application\-Level Remediation
+
+Recommended replacing the static unbounded ConcurrentHashMap with a bounded cache implementation such as **Caffeine**.
+
+The cache should have:
+
+- Maximum size limits
+- Expiration/TTL
+- Automatic eviction
+- Appropriate cleanup behavior
+
+This prevents OrderSession objects from remaining in memory indefinitely.
+
+### Step 13: Defined Dynatrace Monitoring Improvements
+
+Recommended configuring Dynatrace/Davis AI monitoring around JVM memory behavior.
+
+Important signals include:
+
+- JVM heap utilization
+- Garbage collection behavior
+- Memory growth
+- OutOfMemoryError occurrences
+- Service failure rate
+- Response\-time degradation
+
+For example, JVM heap utilization remaining above roughly **85–90%** should be treated as an early warning requiring investigation before complete heap exhaustion occurs.
+
+### Step 14: Defined Infrastructure and Container Memory Controls
+
+Recommended defining appropriate JVM and container memory limits and maintaining sufficient headroom between JVM maximum heap and the container/host memory limit.
+
+Memory monitoring should cover both the Java application and the underlying host so that increasing heap consumption can be detected before it causes an outage.
+
+### Result
+
+The Smartscape analysis showed the relationship between the degraded application, OrderProcessingService, Java process group and critically utilized host.
+
+PurePath then narrowed the failure to OrderCache.addToCache, where an unbounded static ConcurrentHashMap caused continuous OrderSession accumulation.
+
+The investigation therefore identified an **application\-level memory leak leading to JVM heap exhaustion and** **java.lang.OutOfMemoryError** as the root cause of the production issue.
+
