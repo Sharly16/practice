@@ -1,29 +1,34 @@
-# Incident Evidence: TEL-D2-201 (Davis Opened a Problem: Find the Root Cause)
+# Incident Evidence: TEL-D2-202 (Datadog Monitor Fires: Find the Cause)
 
-- **Participant Name / Seat:** Sharly Pricilla Albert Wilson (Seat: YOUR SEAT)
+- **Participant Name / Seat:** Sharly Pricilla Albert Wilson 
 - **Date & Time:** 22-Nov-2026
-- **Ticket ID:** TEL-D2-201
+- **Ticket ID:** TEL-D2-202
 - **Course Outcome:** CO-04
-- **Platform:** Dynatrace (browser)
+- **Platform:** Datadog (browser, single platform)
 
 ## 1. Problem Identification & Initial Observations
 
-- **Observed Failure / Alert / Problem ID:** Dynatrace Davis AI automatically detected payment degradation and opened Problem `P-24101`. Failed payment transactions showed approximately 5000 ms timeout behavior.
-- **Culprit Service / Host / Component:** `PaymentService` on `prod-host-03`. The failing component was `StripeGatewayConnector.authorize()`.
+- **Observed Failure / Alert / Problem ID:** Datadog composite monitor triggered an alert showing CPU utilization greater than 80% and an error rate greater than 5%. The affected transaction correlation ID was `TXN-88129-CORR`.
+- **Culprit Service / Host / Component:** `prod-worker-02` / Checkout service / Credit Card Checker transaction flow.
 
 ## 2. Diagnostic Query / Screen Path / Links
 
-Dynatrace → Problems → Problem `P-24101` → Smartscape Topology → Frontend → Checkout → PaymentService (`prod-host-03`) → PurePaths → Failed Requests → `StripeGatewayConnector.authorize()`
+Datadog → Monitors → Composite Monitor → Review CPU and Error Rate alert → Identify affected host `prod-worker-02` → Extract correlation ID `TXN-88129-CORR`.
+
+Splunk verification query:
+
+`index=retail_prod host=prod-worker-02 sourcetype="checkout:json" "TXN-88129-CORR"`
 
 ## 3. Root Cause Analysis (RCA)
 
-Dynatrace Smartscape was used to follow the affected transaction from the frontend through checkout to `PaymentService` on `prod-host-03`. The failed transaction was then analyzed using Dynatrace PurePath.
+The Datadog composite monitor detected abnormal behavior on `prod-worker-02`, where CPU utilization exceeded 80% and the application error rate exceeded 5%.
 
-The failure was isolated to `StripeGatewayConnector.authorize()`. The authorization request experienced a timeout of approximately 5000 ms and generated a `SocketTimeoutException`.
+The transaction correlation ID `TXN-88129-CORR` was used to trace the affected checkout transaction. The same correlation ID was searched in the production checkout logs to locate the corresponding ERROR event and stack trace.
 
-Therefore, the payment degradation was caused by the Stripe gateway authorization call timing out, resulting in slow or failed payment transactions.
+The evidence indicates that the checkout transaction was failing in the Credit Card Checker flow. The simulated `CreditCardChecker500` fault generated checkout processing failures, which increased the application error rate and contributed to the Datadog alert.
 
-## 4. Cross-Platform Verification & Next Action
+## 4. Verification & Next Action
 
-- **Second platform confirming (with screenshot):** Payment transaction/request evidence should be attached from the available supporting monitoring or application telemetry showing the same payment failure/time window.
-- **Recommended Action Item / Escalation:** Escalate the Stripe gateway timeout to the payment integration/application support team. Review `StripeGatewayConnector` connection and read-timeout configuration, external gateway availability and latency, and retry behavior. Configure appropriate timeout monitoring and alerting to detect similar payment gateway degradation earlier.
+- **Second view in the same platform that confirms (with screenshot):** Datadog monitor details showing `prod-worker-02`, CPU utilization above 80%, error rate above 5%, and correlation ID `TXN-88129-CORR`. The corresponding transaction should also be verified using the matching checkout ERROR log and stack trace.
+
+- **Recommended Action Item / Escalation:** Investigate the Credit Card Checker failure associated with `TXN-88129-CORR`, review the matching application stack trace, and remediate the failing checkout dependency. Continue monitoring CPU utilization and checkout error rate after remediation to confirm that both metrics return to normal levels.
