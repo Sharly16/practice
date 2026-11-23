@@ -1,18 +1,273 @@
-{
-  "ticket": "TEL-D3-303",
-  "participant": "Sharly Pricilla Albert Wilson",
-  "date": "2026-11-23",
-  "courseOutcome": "CO-09",
-  "incidentSummary": {
-    "observedDefect": "Checkout latency exceeds 4 seconds during the promotion, but the Datadog monitor remains green and does not trigger an alert. The monitor uses average latency and monitors env:staging instead of env:prod.",
-    "rootCauseComponent": "Datadog checkout latency monitor incorrectly configured with average latency and env:staging."
-  },
-  "telemetryFixes": {
-    "primaryQueryOrFix": "p95(last_5m):p95:shopnow.checkout.duration{env:prod} by {service} > 2.5",
-    "secondaryQueryOrThreshold": "Composite monitor combining p95 checkout latency (A) AND checkout log error rate (B) using A && B."
-  },
-  "verification": {
-    "verifiedOnPlatform": false,
-    "mitigationRecommendation": "Use p95 latency instead of average latency, monitor env:prod instead of env:staging, and use the composite A && B monitor to detect production checkout issues."
-  }
-}
+# Assignment Question 3: RTEL_Q09_E
+
+## Observability Lab: Datadog Query Language & Facet Metric Construction
+
+**Exam Code:** P1D10  
+**Question Code:** RTEL_Q09_E  
+**Problem Code:** rtel_datadog_dql_facets  
+**Service:** customer-api  
+**Environment:** production  
+**Monitor:** API Latency & Error Rate Multi-Condition Monitor  
+
+## 1. Monitor Objective & Scope
+
+The objective of this assignment is to design Datadog monitoring for the production `customer-api` service using latency metrics, error-rate metrics, log facets, and multi-condition alert rules.
+
+The monitor helps identify API endpoints experiencing both high p95 response latency and elevated error rates.
+
+Log facets are used to make important attributes such as HTTP status code, customer tier, error type, and duration searchable and usable for monitoring and troubleshooting.
+
+---
+
+## 2. Datadog Metric Query Formulation
+
+### A. P95 Latency Query
+
+The latency monitor evaluates the p95 API response latency during the last five minutes.
+
+**Datadog Query:**
+
+`p95(last_5m):p95:customer_api.request.duration{env:production} by {endpoint} > 4000`
+
+### Thresholds
+
+- **Warning:** 2500 ms
+- **Critical:** 4000 ms
+- **Evaluation Window:** Last 5 minutes
+
+### Endpoint Results
+
+**GET /api/v1/customers**
+
+- Observed p95 latency: **195 ms**
+- Monitor status: **OK**
+
+The p95 latency is well below both warning and critical thresholds.
+
+**POST /api/v1/checkout**
+
+- Observed p95 latency: **4650 ms**
+- Monitor status: **CRITICAL**
+
+The observed latency exceeds the 4000 ms critical threshold.
+
+**POST /api/v1/cards/charge**
+
+- Observed p95 latency: **5200 ms**
+- Monitor status: **CRITICAL**
+
+The observed latency exceeds the 4000 ms critical threshold.
+
+---
+
+### B. Error Rate Query
+
+The error-rate monitor evaluates the percentage of requests producing errors.
+
+**Datadog Query:**
+
+`sum(last_5m):sum:customer_api.errors{env:production} by {endpoint} / sum:customer_api.requests{env:production} by {endpoint} * 100 > 10`
+
+### Error Rate Thresholds
+
+- **Warning:** 5%
+- **Critical:** 10%
+- **Evaluation Window:** Last 5 minutes
+
+### Observed Results
+
+**GET /api/v1/customers**
+
+- Total requests: **45,000**
+- Total errors: **45**
+- Error rate: **0.1%**
+- Status: **OK**
+
+**POST /api/v1/checkout**
+
+- Total requests: **12,000**
+- Total errors: **1,440**
+- Error rate: **12.0%**
+- Status: **CRITICAL**
+
+**POST /api/v1/cards/charge**
+
+- Total requests: **8,500**
+- Total errors: **1,190**
+- Error rate: **14.0%**
+- Status: **CRITICAL**
+
+Both the checkout and card-charge endpoints exceed the 10% critical error-rate threshold.
+
+---
+
+## 3. Log Facets & Log-to-Metric Rule Definition
+
+### `@http.status_code`
+
+**Data Type:** Integer
+
+**Operational Purpose:** Filters API requests according to HTTP response status code and makes it easier to identify HTTP 4xx and 5xx failures.
+
+**Example Filter Query:**
+
+`@http.status_code:>=500`
+
+---
+
+### `@customer.tier`
+
+**Data Type:** String
+
+**Operational Purpose:** Differentiates VIP customers from standard-tier customers.
+
+**Example Filter Query:**
+
+`@customer.tier:VIP`
+
+---
+
+### `@error.type`
+
+**Data Type:** String
+
+**Operational Purpose:** Groups log events according to exception or error type.
+
+**Example Filter Query:**
+
+`@error.type:TimeoutException`
+
+---
+
+### `@duration_ms`
+
+**Data Type:** Double
+
+**Operational Purpose:** Generates a log-based percentile latency metric that can be used to calculate p95 API latency.
+
+**Example Filter Query:**
+
+`@duration_ms:>4000`
+
+---
+
+## 4. Multi-Condition Monitor Alert Configuration
+
+**Metric Evaluated:** p95 API latency AND API error rate
+
+**Evaluation Window:** Last 5 minutes
+
+**Warning Thresholds:**
+
+- p95 latency greater than **2500 ms**
+- Error rate greater than **5%**
+
+**Critical Thresholds:**
+
+- p95 latency greater than **4000 ms**
+- Error rate greater than **10%**
+
+### Alert Logic
+
+The critical monitor should trigger when both conditions are satisfied:
+
+**Condition A:** p95 API latency > 4000 ms
+
+**AND**
+
+**Condition B:** API error rate > 10%
+
+This multi-condition approach prevents an alert from being generated based only on a temporary latency increase or a small number of isolated errors.
+
+---
+
+## 5. Critical Endpoint Analysis
+
+### POST /api/v1/checkout
+
+The checkout endpoint is in a critical condition because:
+
+- p95 latency = **4650 ms**
+- Critical latency threshold = **4000 ms**
+- Error rate = **12.0%**
+- Critical error-rate threshold = **10%**
+
+Therefore, the checkout endpoint satisfies both critical monitor conditions.
+
+**Monitor Status: CRITICAL**
+
+---
+
+### POST /api/v1/cards/charge
+
+The card-charge endpoint is also in a critical condition because:
+
+- p95 latency = **5200 ms**
+- Critical latency threshold = **4000 ms**
+- Error rate = **14.0%**
+- Critical error-rate threshold = **10%**
+
+Therefore, the card-charge endpoint satisfies both critical monitor conditions.
+
+**Monitor Status: CRITICAL**
+
+---
+
+### GET /api/v1/customers
+
+The customers endpoint is operating normally:
+
+- p95 latency = **195 ms**
+- Error rate = **0.1%**
+
+Both values are well below their respective warning and critical thresholds.
+
+**Monitor Status: OK**
+
+---
+
+## 6. Notification Message / Routing
+
+**Critical Alert Message:**
+
+Critical API performance issue detected in the production `customer-api` service. The affected endpoint has exceeded both the 4000 ms p95 latency threshold and the 10% error-rate threshold during the last five minutes. Immediate investigation of application logs, downstream dependencies, and service performance is required.
+
+
+
+## 7. Operational Recommendations
+
+1. Monitor production p95 latency continuously rather than relying only on average latency.
+
+2. Configure the warning latency threshold at **2500 ms** and critical latency threshold at **4000 ms**.
+
+3. Configure the warning error-rate threshold at **5%** and critical threshold at **10%**.
+
+4. Prioritize investigation of `/api/v1/checkout` because its observed p95 latency is **4650 ms** and error rate is **12%**.
+
+5. Prioritize `/api/v1/cards/charge` because its p95 latency is **5200 ms** and error rate is **14%**.
+
+6. Use `@http.status_code` to isolate HTTP server errors.
+
+7. Use `@error.type` to identify the exceptions associated with failed API calls.
+
+8. Use `@customer.tier` to determine whether failures disproportionately affect VIP customers.
+
+9. Use `@duration_ms` to investigate individual slow requests and generate percentile-based latency metrics.
+
+10. Use a multi-condition alert requiring high latency and high error rate to identify significant production incidents.
+
+---
+
+## 8. Conclusion
+
+The Datadog analysis identified significant performance and reliability problems affecting the production `customer-api` service.
+
+The `/api/v1/checkout` endpoint reached a p95 latency of **4650 ms** and an error rate of **12%**.
+
+The `/api/v1/cards/charge` endpoint reached a p95 latency of **5200 ms** and an error rate of **14%**.
+
+Both endpoints exceeded the configured critical thresholds of **4000 ms p95 latency** and **10% error rate**, so both should be considered **CRITICAL**.
+
+The `/api/v1/customers` endpoint remained healthy with a p95 latency of **195 ms** and an error rate of only **0.1%**.
+
+Datadog facets such as `@http.status_code`, `@customer.tier`, `@error.type`, and `@duration_ms` provide additional dimensions for troubleshooting. Combining these facets with p95 latency and error-rate monitoring provides stronger visibility into production API failures.
