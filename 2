@@ -1,57 +1,298 @@
-# Incident Evidence: TEL-D3-302 (Which App Is Failing? Ask Grail)
+# Observability Lab: Dynatrace Grail & DQL Event Querying
 
-- **Participant Name:** Sharly Pricilla Albert Wilson
-- **Date & Time:** 23-Nov-2026
-- **Ticket ID:** `TEL-D3-302`
-- **Course Outcome:** `CO-08`
-- **Platform:** Dynatrace (browser, easyTravel)
+## 1. Objective & Grail Lakehouse Overview
 
-## 1. Problem Identification & Initial Observations
+The objective of this assignment is to analyze application log events stored in Dynatrace Grail using Dynatrace Query Language (DQL).
 
-- **Observed Failure:** The easyTravel application is experiencing failed service requests after the `CreditCardCheckError500` fault was enabled. Dynatrace telemetry shows an increase in failed requests, indicating a service-side failure that requires investigation using Grail logs and service telemetry.
+The analysis includes:
 
-- **Culprit Service / Host / Component:** easyTravel service associated with the `CreditCardCheckError500` failure.
+- Fetching log records from Grail.
+- Filtering ERROR events.
+- Grouping errors by service and host.
+- Counting events by event type.
+- Grouping events into time intervals.
+- Identifying the host and service responsible for most errors.
+- Examining exception messages to determine the technical root cause.
+- Recommending monitoring and alerting improvements.
 
-## 2. Diagnostic Query & Telemetry Evidence
+Dynatrace Grail is an indexless and schema-on-read data lakehouse. It stores logs, metrics, traces, events, and business data without requiring traditional indexing before ingestion.
 
-The following Dynatrace Grail DQL can be used to identify the processes generating logs:
+Grail uses massively parallel processing to distribute DQL queries across multiple processing nodes. This allows large telemetry datasets to be searched and analyzed efficiently.
 
-`fetch logs, from: now() - 10m | summarize count(), by: {dt.process.name}`
+A DQL query is built as a pipeline. It usually starts with `fetch`, followed by commands such as `filter`, `summarize`, and `sort`. Each command passes its results to the next command using the pipe character.
 
-The failure investigation can then use the available telemetry fields:
+---
 
-`loglevel`
+## 2. Formulating DQL Queries (`fetch`, `filter`, `summarize`, `sort`)
 
-`dt.process.name`
+### A. Filter Error Logs by Service
 
-`request.is_failed`
+**DQL Statement:**
 
-The service failure metric used for investigation is:
+```dql
+fetch logs
+| filter status == "ERROR"
+| summarize ErrorCount = count(), by: {service.name, host.name}
+| sort ErrorCount desc
+```
 
-`dt.service.requests.failure_count`
+### Query Explanation
 
-These telemetry fields and the service failure metric allow the failed requests to be correlated with the responsible easyTravel process/service.
+- `fetch logs` retrieves log records from Dynatrace Grail.
+- `filter status == "ERROR"` keeps only ERROR events.
+- `summarize ErrorCount = count()` calculates the number of ERROR events.
+- `by: {service.name, host.name}` groups the errors by service and host.
+- `sort ErrorCount desc` displays the highest error count first.
 
-If a query does not return results initially, the available log fields can first be inspected using:
+### Observed Results
 
-`fetch logs | limit 5`
+| Service Name | Host Name | Error Count |
+|---|---|---:|
+| `order-service` | `k8s-worker-node-02` | 3 |
+| `payment-service` | `k8s-worker-node-03` | 1 |
 
-This provides sample records that can be inspected before constructing the final filtering and aggregation queries.
+The `order-service` running on `k8s-worker-node-02` generated the highest number of ERROR events.
 
-## 3. Root Cause Analysis (RCA)
+---
 
-The investigation indicates that the easyTravel service failures are caused by the `CreditCardCheckError500` fault introduced through the scenario configuration.
+### B. Grouping by Event Type and Time Bins
 
-The fault generates HTTP 500-style failures in the easyTravel application. Dynatrace Grail telemetry can be used to isolate the affected process by examining logs using `dt.process.name` and identifying failed requests through `request.is_failed`.
+**DQL Statement:**
 
-The `dt.service.requests.failure_count` metric provides additional telemetry evidence showing the increase in service request failures.
+```dql
+fetch logs
+| summarize TotalOccurrences = count(), by: {event.type}
+| sort TotalOccurrences desc
+```
 
-Therefore, the root cause is the intentionally injected `CreditCardCheckError500` condition affecting the easyTravel service, resulting in failed service requests visible through Dynatrace telemetry.
+A time-based version of the query is:
 
-## 4. Verification & Solution Details
+```dql
+fetch logs
+| makeTimeseries TotalOccurrences = count(), interval: 1m, by: {event.type}
+```
 
-- **Fixed Metric / Rule / Parameter:** Investigated failed service requests using `request.is_failed`, correlated the failures with `dt.process.name`, and verified the service failure condition using the `dt.service.requests.failure_count` metric.
+### Query Explanation
 
-- **Observed Result After Fix:** Dynatrace Grail telemetry successfully exposes the affected easyTravel service/process and provides visibility into the failed requests generated by the injected `CreditCardCheckError500` condition.
+- `fetch logs` retrieves all log records.
+- `summarize` groups the events by `event.type`.
+- `count()` counts the number of events in each group.
+- `sort` arranges the event types from highest to lowest occurrence.
+- `makeTimeseries` groups the events into one-minute time intervals.
 
-- **Recommended Action Item:** Remove or disable the `CreditCardCheckError500` fault condition, verify that the easyTravel service returns to normal operation, and continue monitoring `dt.service.requests.failure_count` to confirm that service request failures return to the expected level.
+### Event Breakdown
+
+| Event Type | Total Occurrences |
+|---|---:|
+| `app_crash` | 3 |
+| `audit` | 2 |
+| `network_timeout` | 1 |
+| `performance_warning` | 1 |
+| `retry` | 1 |
+
+The most common event type was `app_crash`, with three occurrences.
+
+---
+
+## 3. Crash Pattern Diagnosis & Host Attribute Correlation
+
+### 3.1 Which host and service accounted for 75% of all ERROR events?
+
+The dataset contained four ERROR events in total.
+
+Three of the four ERROR events were generated by `order-service` on `k8s-worker-node-02`.
+
+The percentage was calculated as:
+
+`3 ÷ 4 × 100 = 75%`
+
+- **Failing Host:** `k8s-worker-node-02`
+- **Failing Service:** `order-service`
+- **Error Types Logged:** `app_crash`
+- **Error Count:** 3
+- **Percentage of All ERROR Events:** 75%
+
+The remaining ERROR event was generated by `payment-service` on `k8s-worker-node-03`. This event represented 25% of the total ERROR events.
+
+---
+
+### 3.2 What specific root-cause exceptions are captured in the log content?
+
+The three exceptions associated with `order-service` on `k8s-worker-node-02` were:
+
+- **Exception 1:** `DatabaseConnectionTimeout`
+- **Exception 2:** `NullPointerException`
+- **Exception 3:** `OutOfMemoryError`
+
+The exception details captured in the log content were:
+
+1. `DatabaseConnectionTimeout: Connection pool exhausted`
+2. `NullPointerException: OrderPayloadValidator validation failure`
+3. `OutOfMemoryError: Metaspace limit exceeded`
+
+These errors indicate multiple technical problems affecting the `order-service`:
+
+- Database connection pool exhaustion.
+- An application validation or null-handling defect.
+- Insufficient JVM Metaspace or a possible class-loading memory leak.
+
+A separate error was recorded for `payment-service`:
+
+`SocketTimeout: Stripe gateway read timed out`
+
+This error was categorized as `network_timeout`.
+
+---
+
+## 4. Root Cause Analysis
+
+The main failing component was `order-service` running on `k8s-worker-node-02`.
+
+The dataset contained four ERROR events, and three were generated by this service and host combination. Therefore, `order-service` on `k8s-worker-node-02` accounted for 75% of all recorded errors.
+
+The three `order-service` errors were classified as `app_crash` events. The log content showed three different exceptions:
+
+- `DatabaseConnectionTimeout`
+- `NullPointerException`
+- `OutOfMemoryError`
+
+The `DatabaseConnectionTimeout` occurred because the database connection pool was exhausted. This can prevent new order requests from obtaining a database connection.
+
+The `NullPointerException` indicates a defect or missing validation in the order payload processing logic.
+
+The `OutOfMemoryError` indicates that the JVM Metaspace limit was exceeded. This can cause application instability or service termination.
+
+The combination of these exceptions shows that the main issue was concentrated in the `order-service` rather than being distributed across every application service.
+
+---
+
+## 5. Additional Dataset Findings
+
+The Grail dataset contained eight log records in total:
+
+| Status | Number of Events |
+|---|---:|
+| ERROR | 4 |
+| INFO | 2 |
+| WARN | 2 |
+
+### Services Observed
+
+- `auth-service`
+- `order-service`
+- `inventory-service`
+- `payment-service`
+
+### Hosts Observed
+
+- `k8s-worker-node-01`
+- `k8s-worker-node-02`
+- `k8s-worker-node-03`
+
+### Other Important Events
+
+- `inventory-service` generated a performance warning for a slow cache response of 1420 ms.
+- `payment-service` generated a `SocketTimeout` while accessing the Stripe gateway.
+- `payment-service` also recorded a retry event for credit-card validation.
+- `auth-service` generated two normal audit events.
+
+---
+
+## 6. Operational Recommendations
+
+### DQL Alerting Rules
+
+Create a Dynatrace alert when the same service generates two or more ERROR events within five minutes.
+
+Use service and host dimensions in the alert to identify whether failures are concentrated on one Kubernetes worker node.
+
+Create separate alerts for:
+
+- `DatabaseConnectionTimeout`
+- `NullPointerException`
+- `OutOfMemoryError`
+- `SocketTimeout`
+- Repeated `app_crash` events
+- Repeated payment retries
+- Cache response times greater than 1000 ms
+
+### Database Connection Pool
+
+Review the database connection pool configuration for `order-service`.
+
+Monitor:
+
+- Active database connections.
+- Waiting connection requests.
+- Connection acquisition time.
+- Connection timeout counts.
+- Maximum connection pool size.
+
+The connection pool should be increased only after checking for connection leaks and ensuring that connections are closed correctly.
+
+### Null-Pointer Prevention
+
+Review the `OrderPayloadValidator` application logic.
+
+Add:
+
+- Null checks.
+- Required-field validation.
+- Input schema validation.
+- Unit tests for missing order fields.
+- Structured error handling.
+
+### JVM Memory Monitoring
+
+Review the JVM Metaspace configuration for `order-service`.
+
+Monitor:
+
+- Metaspace usage.
+- Loaded class count.
+- Class-loader activity.
+- Garbage collection behavior.
+- Pod restarts.
+- Container memory usage.
+
+The Metaspace limit may need to be increased, but the application should also be checked for a class-loader or deployment-related memory leak.
+
+### Payment-Service Monitoring
+
+Monitor the external Stripe gateway dependency for:
+
+- Request latency.
+- Read timeout frequency.
+- Failed payment calls.
+- Retry count.
+- Circuit-breaker state.
+
+Use controlled retries with exponential backoff to avoid repeatedly sending requests during an external dependency problem.
+
+### Grail Data Retention
+
+Retain ERROR and application-crash logs longer than routine INFO logs.
+
+A suitable retention approach is:
+
+- ERROR and security-relevant logs: 90 days or according to organizational policy.
+- WARN logs: 30 to 60 days.
+- Routine INFO and audit logs: 30 days, unless a longer compliance period is required.
+
+---
+
+## 7. Conclusion
+
+Dynatrace Grail and DQL were used to analyze eight application log events.
+
+The DQL analysis identified `order-service` running on `k8s-worker-node-02` as the main failing component. This service-host combination generated three of the four ERROR events, representing 75% of all errors.
+
+The three root-cause exceptions were:
+
+- `DatabaseConnectionTimeout`
+- `NullPointerException`
+- `OutOfMemoryError`
+
+The event-type analysis also identified three `app_crash` events, two `audit` events, one `network_timeout`, one `performance_warning`, and one `retry` event.
+
+The recommended actions are to investigate the database connection pool, correct payload-validation defects, review JVM Metaspace usage, and configure Dynatrace alerts for repeated service errors and application crashes.
