@@ -1,67 +1,140 @@
-# Incident Evidence: TEL-D3-301 (Error Spike on One Host After a Release)
 
-- **Participant Name:** Sharly Pricilla Albert Wilson
-- **Date & Time:** Enter the actual date and time of lab execution
-- **Ticket ID:** `TEL-D3-301`
-- **Course Outcome:** `CO-07`
-- **Platform:** Local Docker (Splunk Enterprise trial)
+1. Scenario & Query Objectives
 
-## 1. Problem Identification & Initial Observations
+Replace the comment under section 1 with:
 
-- **Observed Failure:** After a recent production deployment, the ShopNow application experienced a significant increase in errors. The post-deployment error rate increased to **8.4%**. Standard Splunk log searches were not able to properly extract the error codes because the application logs contained unstructured error information.
+Analyze the web access logs using Splunk SPL to calculate HTTP request counts and average response times, identify the most active client IP addresses, extract user and session fields using regular expressions, and group related events into complete user sessions using the transaction command.
 
-- **Culprit Service / Host / Component:** `web-prod-04`
+2. Statistical Pipeline Queries
+A. HTTP Status Breakdown & Average Latency per Endpoint
 
-The investigation showed that `web-prod-04` was responsible for approximately **92% of the observed errors**, making this host the primary source of the post-release error spike.
+Under SPL Query, put:
 
-## 2. Diagnostic Query & Telemetry Evidence
+| stats count AS Event_Count avg(resp_ms) AS Average_Latency by uri status
 
-Broad Splunk search used to analyze recent events across the Retail Web and Retail Checkout indexes:
+Fill the Results Table like this
+URI Endpoint	HTTP Status	Event Count	Average Latency (ms)/api/v1/auth	200	2	37.5
+/api/v1/checkout	500	3	5120
+/api/v1/checkout	504	1	5280
+/api/v1/inventory	200	1	48
+/api/v1/logout	200	1	28
+/api/v1/products	200	2	58.5
+Why these values are correct
 
-`(index=retail_web OR index=retail_checkout) earliest=-4h | stats count by host, sourcetype | sort -count`
+For example, checkout status 500 has three response times:
 
-The query grouped events by host and sourcetype and sorted the results by event count. The results isolated `web-prod-04` as the host generating the majority of the errors.
+5120
+5090
+5150
 
-The following `rex` command was used to extract the error code from the unstructured application logs:
 
-`rex field=_raw "status_code=(?<err_code>ERR-[0-9]{4})"`
+Average:
 
-A 15-minute timechart was then used to analyze the extracted error codes over time:
+(5120 + 5090 + 5150) / 3 = 5120 ms
 
-`timechart span=15m count by err_code`
+For /api/v1/auth:
 
-Checkout sessions were also analyzed using:
+(35 + 40) / 2 = 37.5 ms
 
-`index=retail_checkout earliest=-4h | transaction session_id maxspan=30m | where duration > 10 | table session_id, duration, eventcount`
+For /api/v1/products:
 
-This grouped related events using `session_id` and helped identify longer-running checkout sessions affected during the incident.
+(62 + 55) / 2 = 58.5 ms
 
-## 3. Root Cause Analysis (RCA)
+B. Top Requesting Clients
 
-The investigation determined that the post-deployment increase in errors was primarily associated with the production host `web-prod-04`.
+Under SPL Query, put:
 
-The host accounted for approximately **92% of the observed errors**, which showed that the issue was concentrated on a single production host rather than being distributed evenly across the ShopNow environment.
+| top client_ip
 
-The initial Splunk searches were insufficient because the application error codes were embedded inside unstructured raw log messages. As a result, Splunk could not directly use the error code as a structured field.
 
-The `rex` command was used to extract the `status_code` value into a new field called `err_code`. After extracting the field, the error patterns could be analyzed using Splunk statistics and time-based analysis.
+Under Top Clients Observed, put:
 
-Therefore, the investigation isolated `web-prod-04` as the culprit host and improved the telemetry query so that the application's error codes could be correctly analyzed.
+The most active client IP addresses were 198.51.100.22 and 203.0.113.41, with 3 requests each. The remaining client IP addresses generated one request each.
 
-## 4. Verification & Solution Details
+From the dataset:
 
-- **Fixed Metric / Rule / Parameter:** Extracted the application error code from `_raw` logs using the Splunk `rex` command and used `err_code` as a structured field for further investigation.
+Client IP	Request Count198.51.100.22	3
+203.0.113.41	3
+192.0.2.89	1
+198.51.100.104	1
+203.0.113.99	1
+192.0.2.140	1
+3. Regular Expression Field Extraction (rex)
 
-`rex field=_raw "status_code=(?<err_code>ERR-[0-9]{4})"`
+Your sample raw log format is:
 
-- **Observed Result After Fix:** Splunk was able to extract the previously unstructured application error codes into the `err_code` field. The investigation isolated `web-prod-04` as the primary problematic host, responsible for approximately **92% of the errors**. The extracted error codes could also be analyzed using a 15-minute timechart.
+user="admin" session_id="sess_88192"
 
-- **Recommended Action Item:** Investigate and remediate the application instance running on `web-prod-04`, review the recent deployment changes affecting this host, and continue monitoring the host after remediation. Maintain structured extraction of `err_code` in Splunk so that similar post-deployment error spikes can be detected and investigated more quickly.
 
-## Validation
+Under SPL rex Query, put:
 
-After completing the evidence file, run:
+| rex field=_raw "user=\"(?<user>[^\"]+)\"\s+session_id=\"(?<session_id>[^\"]+)\""
 
-`./validation_script.sh check`
+Regex Syntax Explanation
 
-Expected outcome: the validation harness verifies that the required TEL-D3-301 evidence has been completed.
+Put:
+
+(?<user>[^\"]+) creates a named field called user and captures all characters inside the user value until the next quotation mark.
+
+\s+ matches one or more whitespace characters between the user and session fields.
+
+(?<session_id>[^\"]+) creates a named field called session_id and captures the session identifier from the raw log record.
+
+4. Transaction Grouping (transaction)
+
+Under SPL Transaction Query, put:
+
+| transaction session_id
+| eval associated_user=mvindex(user,0)
+| eval session_outcome=if(match(mvjoin(status,","),"500|504"),"Failed","Successful")
+| table session_id associated_user eventcount duration session_outcome
+
+Transaction Results
+
+Fill the table as follows:
+
+Session ID	Associated User	Event Count	Total Duration (seconds)	Session Status Outcomesess_88192	admin	3	51	Successful
+sess_99104	cust_104	3	46	Failed
+sess_77215	guest	1	0	Successful
+sess_66190	mgr_02	1	0	Successful
+sess_55219	cust_218	1	0	Failed
+sess_44102	guest	1	0	Successful
+Transaction calculation
+
+For sess_88192, the events occur at:
+
+10:14:01
+10:14:05
+10:14:52
+
+Therefore:
+
+Duration = 51 seconds
+
+For sess_99104, the events occur at:
+
+10:14:12
+10:14:24
+10:14:58
+
+Therefore:
+
+Duration = 46 seconds
+
+sess_99104 contains HTTP 500 and 504 checkout failures, so its outcome is Failed.
+
+5. Security & Operational Analysis
+
+Replace the existing comment in section 5 with:
+
+The analysis identified cust_104 using session sess_99104 as the user session experiencing repeated checkout failures. The session generated three checkout requests, including HTTP 500 and HTTP 504 errors, with response times of 5120 ms, 5280 ms, and 5150 ms. This represents both repeated server-side failures and very high checkout latency.
+
+Another failed checkout request was generated by cust_218 in session sess_55219, which returned HTTP 500 with a response time of 5090 ms.
+
+The most active client IP addresses were 198.51.100.22 and 203.0.113.41, with three requests each.
+
+From an operational monitoring perspective, alerts should be configured for repeated HTTP 500/504 responses and unusually high checkout response times. Repeated checkout failures within the same session should be treated as a high-priority condition because they directly affect the completion of user transactions.
+
+
+Then you can proceed with the assessment/evaluation step.
+
