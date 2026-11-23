@@ -1,218 +1,67 @@
+# Incident Evidence: TEL-D3-301 (Error Spike on One Host After a Release)
 
+- **Participant Name:** Sharly Pricilla Albert Wilson
+- **Date & Time:** Enter the actual date and time of lab execution
+- **Ticket ID:** `TEL-D3-301`
+- **Course Outcome:** `CO-07`
+- **Platform:** Local Docker (Splunk Enterprise trial)
 
-Observability Lab: Dynatrace Grail & DQL Event Querying
-1. Objective & Grail Lakehouse Overview
-Dynatrace Grail is a schema-on-read data lakehouse designed to store and analyze observability data such as logs, metrics, events, and traces at scale.
+## 1. Problem Identification & Initial Observations
 
-Dynatrace Query Language (DQL) uses pipeline-based processing. Commands are connected using the pipe (|) operator. In this analysis:
+- **Observed Failure:** After a recent production deployment, the ShopNow application experienced a significant increase in errors. The post-deployment error rate increased to **8.4%**. Standard Splunk log searches were not able to properly extract the error codes because the application logs contained unstructured error information.
 
-fetch retrieves log records.
-filter isolates required events.
-summarize aggregates matching records.
-sort orders the results for easier analysis.
-The supplied Grail dataset contains 8 log records.
+- **Culprit Service / Host / Component:** `web-prod-04`
 
-2. Formulating DQL Queries (fetch, filter, summarize, sort)
-A. Filter Error Logs by Service
-DQL Statement:
-fetch logs
-| filter status == "ERROR"
-| summarize error_count = count(), by:{service.name, host.name}
-| sort error_count desc
-Observed Results:
-Service Name	Host Name	Error Count
-order-service	k8s-worker-node-02	3
-payment-service	k8s-worker-node-03	1
-Finding: There are 4 ERROR events in total. Three of the four ERROR events occur in order-service on k8s-worker-node-02, representing 75% of all ERROR events.
+The investigation showed that `web-prod-04` was responsible for approximately **92% of the observed errors**, making this host the primary source of the post-release error spike.
 
-B. Grouping by Event Type & Time Bins
-DQL Statement:
-fetch logs
-| filter status == "ERROR" or status == "WARN"
-| summarize total_occurrences = count(), by:{event.type}
-| sort total_occurrences desc
-Event Breakdown:
-Event Type	Total Occurrences
-app_crash	3
-network_timeout	1
-performance_warning	1
-retry	1
-The remaining two records are INFO/audit events.
+## 2. Diagnostic Query & Telemetry Evidence
 
-Time Window Analysis
-fetch logs
-| filter status == "ERROR"
-| summarize error_count = count(), by:{bin(timestamp, 2m)}
-| sort timestamp asc
-Observed ERROR timestamps:
+Broad Splunk search used to analyze recent events across the Retail Web and Retail Checkout indexes:
 
-11:01:20 – order-service application crash
-11:03:05 – order-service application crash
-11:04:12 – payment-service network timeout
-11:06:40 – order-service application crash
-This shows repeated failures throughout the observed time period rather than a single isolated error.
+`(index=retail_web OR index=retail_checkout) earliest=-4h | stats count by host, sourcetype | sort -count`
 
-3. Crash Pattern Diagnosis & Host Attribute Correlation
-1. Which host and service accounted for 75% of all ERROR events?
-Failing Host: k8s-worker-node-02
-Failing Service: order-service
-Error Types Logged: app_crash
-ERROR Count: 3
-Percentage of ERROR Events: 75%
-Three of the four ERROR records belong to order-service running on k8s-worker-node-02. This makes that service/host combination the primary application-crash hotspot.
+The query grouped events by host and sourcetype and sorted the results by event count. The results isolated `web-prod-04` as the host generating the majority of the errors.
 
-DQL Query
-fetch logs
-| filter status == "ERROR"
-| summarize error_count = count(), by:{host.name, service.name, event.type}
-| sort error_count desc
-2. What specific root-cause exceptions are captured in the log content?
-Exception 1: DatabaseConnectionTimeout: Connection pool exhausted [active=50, max=50]
-Exception 2: NullPointerException: OrderPayloadValidator.validate
-Exception 3: OutOfMemoryError: Metaspace limit exceeded
-All three exceptions are associated with:
+The following `rex` command was used to extract the error code from the unstructured application logs:
 
-Service: order-service
-Host: k8s-worker-node-02
-Event Type: app_crash
-DQL Query for Application Crashes
-fetch logs
-| filter event.type == "app_crash"
-| fields timestamp, host.name, service.name, content
-| sort timestamp asc
-Crash Pattern Finding
-order-service experienced three different application failure patterns on the same Kubernetes worker node:
+`rex field=_raw "status_code=(?<err_code>ERR-[0-9]{4})"`
 
-Database connection pool exhaustion.
-Null pointer exception during order payload validation.
-JVM Metaspace exhaustion.
-Because all three application crashes occur on k8s-worker-node-02, investigation should prioritize the order-service workload and resources running on that worker.
+A 15-minute timechart was then used to analyze the extracted error codes over time:
 
-Additional Service Findings
-Payment Service
-payment-service on k8s-worker-node-03 recorded:
+`timechart span=15m count by err_code`
 
-SocketTimeout: Stripe gateway read timed out after 5000ms
-Event type:
+Checkout sessions were also analyzed using:
 
-network_timeout
-A later warning reported:
+`index=retail_checkout earliest=-4h | transaction session_id maxspan=30m | where duration > 10 | table session_id, duration, eventcount`
 
-Retry 2 of 3 triggered for credit card validation
-This indicates that the payment flow encountered an external/network timeout and subsequently entered retry processing.
+This grouped related events using `session_id` and helped identify longer-running checkout sessions affected during the incident.
 
-Inventory Service
-inventory-service on k8s-worker-node-01 recorded:
+## 3. Root Cause Analysis (RCA)
 
-Slow response from cache server: 1420ms
-Status:
+The investigation determined that the post-deployment increase in errors was primarily associated with the production host `web-prod-04`.
 
-WARN
-Event type:
+The host accounted for approximately **92% of the observed errors**, which showed that the issue was concentrated on a single production host rather than being distributed evenly across the ShopNow environment.
 
-performance_warning
-This indicates degraded cache response performance but not an application crash.
+The initial Splunk searches were insufficient because the application error codes were embedded inside unstructured raw log messages. As a result, Splunk could not directly use the error code as a structured field.
 
-Authentication Service
-auth-service on k8s-worker-node-01 produced two INFO/audit records:
+The `rex` command was used to extract the `status_code` value into a new field called `err_code`. After extracting the field, the error patterns could be analyzed using Splunk statistics and time-based analysis.
 
-Token validated for user usr_4910
-Session refreshed for user usr_8812
-These are informational audit events and do not represent application failures.
+Therefore, the investigation isolated `web-prod-04` as the culprit host and improved the telemetry query so that the application's error codes could be correctly analyzed.
 
-Severity Summary
-DQL Statement
-fetch logs
-| summarize event_count = count(), by:{status}
-| sort event_count desc
-Observed Results
-Status	Count
-ERROR	4
-WARN	2
-INFO	2
-Total	8
-Host-Level Summary
-DQL Statement
-fetch logs
-| summarize event_count = count(), by:{host.name, status}
-| sort host.name asc
-Observed Host Distribution
-k8s-worker-node-01
+## 4. Verification & Solution Details
 
-2 INFO events from auth-service
-1 WARN event from inventory-service
-k8s-worker-node-02
+- **Fixed Metric / Rule / Parameter:** Extracted the application error code from `_raw` logs using the Splunk `rex` command and used `err_code` as a structured field for further investigation.
 
-3 ERROR events from order-service
-k8s-worker-node-03
+`rex field=_raw "status_code=(?<err_code>ERR-[0-9]{4})"`
 
-1 ERROR event from payment-service
-1 WARN event from payment-service
-The most significant host is k8s-worker-node-02 because all events recorded for that worker in this dataset are order-service application crashes.
+- **Observed Result After Fix:** Splunk was able to extract the previously unstructured application error codes into the `err_code` field. The investigation isolated `web-prod-04` as the primary problematic host, responsible for approximately **92% of the errors**. The extracted error codes could also be analyzed using a 15-minute timechart.
 
-4. Operational Recommendations
-DQL Alerting Rules
-Configure alerting for repeated app_crash events, particularly when multiple crashes occur for the same service and host within a short time window.
+- **Recommended Action Item:** Investigate and remediate the application instance running on `web-prod-04`, review the recent deployment changes affecting this host, and continue monitoring the host after remediation. Maintain structured extraction of `err_code` in Splunk so that similar post-deployment error spikes can be detected and investigated more quickly.
 
-Example DQL:
+## Validation
 
-fetch logs
-| filter status == "ERROR"
-| filter event.type == "app_crash"
-| summarize crash_count = count(), by:{service.name, host.name}
-| filter crash_count >= 3
-| sort crash_count desc
-For the supplied dataset, this rule would identify:
+After completing the evidence file, run:
 
-order-service
-k8s-worker-node-02
-3 application crashes
-Order Service
-Investigate:
+`./validation_script.sh check`
 
-Database connection pool capacity because the pool reached active=50, max=50.
-OrderPayloadValidator.validate for the NullPointerException.
-JVM Metaspace utilization and class-loading behavior because of OutOfMemoryError: Metaspace limit exceeded.
-Kubernetes pod/container resource limits and restart patterns for order-service.
-Node-level health and resource pressure on k8s-worker-node-02.
-Payment Service
-Investigate:
-
-Stripe gateway/network connectivity.
-The 5000 ms timeout threshold.
-Retry behavior because Retry 2 of 3 was triggered.
-Downstream payment dependency latency and availability.
-Inventory Service
-Investigate cache latency because a response time of 1420ms generated a performance warning.
-
-Grail Retention Strategy
-Retain ERROR and application-crash logs for a longer period than routine informational logs so historical failure patterns and recurring service problems can be investigated.
-
-A practical operational approach is:
-
-Keep ERROR and crash records available for long-term incident and root-cause analysis.
-Retain WARN records long enough for performance trend analysis.
-Use shorter retention for routine INFO/audit records when organizational compliance requirements allow it.
-Use Grail filtering and aggregation to reduce noise while preserving failure evidence.
-Final Findings
-The dataset contains 8 log records:
-
-4 ERROR
-2 WARN
-2 INFO
-The main reliability concern is order-service on k8s-worker-node-02.
-
-The service generated 3 application crashes, representing 75% of all ERROR events.
-
-The three observed root-cause exception patterns were:
-
-DatabaseConnectionTimeout: Connection pool exhausted [active=50, max=50]
-NullPointerException: OrderPayloadValidator.validate
-OutOfMemoryError: Metaspace limit exceeded
-A separate payment-service incident on k8s-worker-node-03 shows a Stripe gateway timeout followed by retry activity.
-
-The analysis demonstrates DQL-style use of fetch, filter, summarize, and sort to isolate failures, aggregate log events, correlate services with Kubernetes worker nodes, analyze events across time windows, and identify the primary application-crash pattern.
-
-
-
-
+Expected outcome: the validation harness verifies that the required TEL-D3-301 evidence has been completed.
