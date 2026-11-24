@@ -1,140 +1,142 @@
+# New Relic NRQL Querying & Performance Audit Report
 
-1. Scenario & Query Objectives
+## 1. Top Slowest Transactions Audit
 
-Replace the comment under section 1 with:
+The transaction dataset was reviewed to identify the slowest database and web transactions across the monitored production applications. The analysis focuses on overall transaction duration, database duration, external-service duration, HTTP response status, errors, and the primary performance bottleneck.
 
-Analyze the web access logs using Splunk SPL to calculate HTTP request counts and average response times, identify the most active client IP addresses, extract user and session fields using regular expressions, and group related events into complete user sessions using the transaction command.
+### Transaction 1
 
-2. Statistical Pipeline Queries
-A. HTTP Status Breakdown & Average Latency per Endpoint
+- **Name:** `WebTransaction/Express/chargeCard`
+- **Application:** `payment-gateway-prod`
+- **Max Duration (s):** 6.89
+- **External Duration (s):** 6.55
+- **HTTP Status / Error:** HTTP 500 / `GatewayTimeoutException: Payment upstream provider unresponsive`
+- **External Call:** `POST https://api.stripe.com/v1/charges`
+- **Primary Bottleneck:** External payment gateway latency. Most of the 6.89-second transaction duration is spent waiting on the external payment provider.
 
-Under SPL Query, put:
+### Transaction 2
 
-| stats count AS Event_Count avg(resp_ms) AS Average_Latency by uri status
+- **Name:** `WebTransaction/SpringController/checkout`
+- **Application:** `order-service-prod`
+- **Max Duration (s):** 5.12
+- **Database Duration (s):** 4.60
+- **HTTP Status / Error:** HTTP 504 / `Lock wait timeout exceeded; try restarting transaction`
+- **Database Statement:** `SELECT * FROM orders WHERE customer_id = ? FOR UPDATE`
+- **Primary Bottleneck:** Database row-lock contention. The database accounts for most of the transaction duration, and the `FOR UPDATE` operation is associated with the lock-wait timeout.
 
-Fill the Results Table like this
-URI Endpoint	HTTP Status	Event Count	Average Latency (ms)/api/v1/auth	200	2	37.5
-/api/v1/checkout	500	3	5120
-/api/v1/checkout	504	1	5280
-/api/v1/inventory	200	1	48
-/api/v1/logout	200	1	28
-/api/v1/products	200	2	58.5
-Why these values are correct
+### Transaction 3
 
-For example, checkout status 500 has three response times:
+- **Name:** `WebTransaction/FastAPI/searchInventory`
+- **Application:** `catalog-service-prod`
+- **Max Duration (s):** 3.80
+- **Database Duration (s):** 3.55
+- **HTTP Status / Error:** HTTP 500 / `QueryExecutionTimeout: Full table scan exceeded 3000ms threshold`
+- **Database Statement:** `SELECT * FROM inventory WHERE title LIKE '%boots%' AND stock > 0`
+- **Primary Bottleneck:** Database full-table scan caused by the wildcard search condition. Almost the entire transaction duration is spent in the database query.
 
-5120
-5090
-5150
+---
 
+## 2. NRQL Query Formulations
 
-Average:
+The following NRQL queries can be used in New Relic to analyze transaction duration, latency percentiles, and application error-rate trends.
 
-(5120 + 5090 + 5150) / 3 = 5120 ms
+### Query 1: Top 10 Slowest Transactions by Average Duration
 
-For /api/v1/auth:
+```sql
+SELECT average(duration)
+FROM Transaction
+FACET name
+LIMIT 10
+```
 
-(35 + 40) / 2 = 37.5 ms
+**Purpose:**  
+This query calculates the average duration of each transaction and returns the top 10 transaction names. It can be used to identify the transaction endpoints that consistently consume the most processing time.
 
-For /api/v1/products:
+### Query 2: Duration Percentile Aggregations (P50, P90, P95, P99)
 
-(62 + 55) / 2 = 58.5 ms
+```sql
+SELECT percentile(duration, 50, 90, 95, 99)
+FROM Transaction
+FACET name
+```
 
-B. Top Requesting Clients
+**Purpose:**  
+This query measures transaction latency using percentile values. P50 represents typical performance, while P90, P95, and P99 reveal progressively slower transaction behavior and help identify latency experienced by the slowest requests.
 
-Under SPL Query, put:
+### Query 3: Time-Series Error Rate Trends
 
-| top client_ip
+```sql
+SELECT percentage(count(*), WHERE error IS true)
+FROM Transaction
+FACET appName
+TIMESERIES
+```
 
+**Purpose:**  
+This query calculates the percentage of transactions containing errors and plots the results over time for each application. It helps identify error spikes and determine which production service is experiencing the greatest reliability impact.
 
-Under Top Clients Observed, put:
+---
 
-The most active client IP addresses were 198.51.100.22 and 203.0.113.41, with 3 requests each. The remaining client IP addresses generated one request each.
+## 3. Latency Percentile Distribution
 
-From the dataset:
+The aggregated metrics show significant differences between normal transaction performance and tail latency.
 
-Client IP	Request Count198.51.100.22	3
-203.0.113.41	3
-192.0.2.89	1
-198.51.100.104	1
-203.0.113.99	1
-192.0.2.140	1
-3. Regular Expression Field Extraction (rex)
+| Metric Dimension | P50 (s) | P90 (s) | P95 (s) | P99 (s) | Operational Assessment |
+|---|---:|---:|---:|---:|---|
+| `WebTransaction/SpringController/checkout` | 0.85 | 3.20 | 4.82 | 5.12 | High database-related tail latency. The large increase from P50 to P99 is consistent with the observed row-lock contention. |
+| `WebTransaction/Express/chargeCard` | 0.65 | 2.50 | 3.45 | 6.89 | Severe P99 latency caused primarily by the external payment-provider call. |
+| `WebTransaction/FastAPI/searchInventory` | 0.35 | 1.95 | 2.95 | 3.80 | Database query performance deteriorates significantly at higher percentiles because of full-table scanning. |
+| `WebTransaction/SpringController/getOrderHistory` | 0.22 | 0.95 | 1.45 | 1.85 | Moderate tail-latency increase, but substantially better than checkout, chargeCard, and searchInventory. |
+| `WebTransaction/FastAPI/getProductDetails` | 0.05 | 0.10 | 0.12 | 0.15 | Healthy and consistent transaction latency with minimal difference between normal and P99 response times. |
 
-Your sample raw log format is:
+### Error Rate Summary
 
-user="admin" session_id="sess_88192"
+| Application | Error Rate |
+|---|---:|
+| `order-service-prod` | 3.85% |
+| `payment-gateway-prod` | 4.50% |
+| `catalog-service-prod` | 2.10% |
 
+Among the three applications, `payment-gateway-prod` has the highest recorded error rate at **4.50%**, followed by `order-service-prod` at **3.85%** and `catalog-service-prod` at **2.10%**.
 
-Under SPL rex Query, put:
+---
 
-| rex field=_raw "user=\"(?<user>[^\"]+)\"\s+session_id=\"(?<session_id>[^\"]+)\""
+## 4. Root Cause Diagnosis & Remediation Strategy
 
-Regex Syntax Explanation
+### 1. Database Row Lock Contention (`orders` table)
 
-Put:
+- **Finding:** The `order-service-prod` checkout transaction reached **5.12 seconds**, with approximately **4.60 seconds** spent in database processing. A failing transaction returned HTTP **504** with the message `Lock wait timeout exceeded; try restarting transaction`. The SQL statement uses `SELECT * FROM orders WHERE customer_id = ? FOR UPDATE`.
 
-(?<user>[^\"]+) creates a named field called user and captures all characters inside the user value until the next quotation mark.
+- **Root Cause:** The `FOR UPDATE` operation locks matching rows while a transaction is active. Concurrent checkout requests attempting to access the same rows can therefore wait for existing locks to be released. Long transactions or high concurrency can increase lock contention and produce timeout failures.
 
-\s+ matches one or more whitespace characters between the user and session fields.
+- **Recommendation:** Reduce the amount of work performed while the database lock is held, commit or roll back transactions as quickly as possible, and review indexing on the `customer_id` lookup to minimize the number of rows involved in locking. Application retry handling should also be considered for transient lock-wait failures.
 
-(?<session_id>[^\"]+) creates a named field called session_id and captures the session identifier from the raw log record.
+### 2. External Gateway Latency (`Stripe API`)
 
-4. Transaction Grouping (transaction)
+- **Finding:** The `payment-gateway-prod` chargeCard transaction reached **6.89 seconds**, of which approximately **6.55 seconds** was external-service duration. The failed transaction returned HTTP **500** and reported `GatewayTimeoutException: Payment upstream provider unresponsive`.
 
-Under SPL Transaction Query, put:
+- **Root Cause:** The application is spending most of the transaction waiting for the external payment-provider request rather than processing locally. This makes the transaction highly dependent on upstream payment-service response latency.
 
-| transaction session_id
-| eval associated_user=mvindex(user,0)
-| eval session_outcome=if(match(mvjoin(status,","),"500|504"),"Failed","Successful")
-| table session_id associated_user eventcount duration session_outcome
+- **Recommendation:** Configure appropriate connection and request timeouts for the payment-provider call. Implement controlled retries with exponential backoff for transient failures and use circuit-breaker protection so prolonged upstream failures do not exhaust application resources. Payment operations should use idempotency mechanisms when retrying requests to prevent duplicate processing.
 
-Transaction Results
+### 3. Full Table Scan on Catalog (`LIKE '%...'`)
 
-Fill the table as follows:
+- **Finding:** `WebTransaction/FastAPI/searchInventory` reached **3.80 seconds**, including approximately **3.55 seconds** of database processing. The failed transaction reported `QueryExecutionTimeout: Full table scan exceeded 3000ms threshold`. The query contains a search pattern such as `title LIKE '%boots%'`.
 
-Session ID	Associated User	Event Count	Total Duration (seconds)	Session Status Outcomesess_88192	admin	3	51	Successful
-sess_99104	cust_104	3	46	Failed
-sess_77215	guest	1	0	Successful
-sess_66190	mgr_02	1	0	Successful
-sess_55219	cust_218	1	0	Failed
-sess_44102	guest	1	0	Successful
-Transaction calculation
+- **Root Cause:** A leading wildcard (`%`) generally prevents a conventional index on `title` from efficiently locating matching rows. As the inventory table grows, scanning a large portion of the table increases query latency and database resource utilization.
 
-For sess_88192, the events occur at:
+- **Recommendation:** Replace the leading-wildcard search pattern where possible and use a search/indexing strategy appropriate for substring or full-text searches. Review the database execution plan before and after optimization. If substring searches are an application requirement, use the database platform's supported full-text-search capability rather than relying on repeated full-table scans.
 
-10:14:01
-10:14:05
-10:14:52
+---
 
-Therefore:
+## 5. Overall Performance Assessment
 
-Duration = 51 seconds
+The performance analysis identifies three primary production risks:
 
-For sess_99104, the events occur at:
+1. **Database contention in `order-service-prod`** is increasing checkout latency and generating lock-wait failures.
+2. **External payment-provider latency in `payment-gateway-prod`** is creating the highest observed transaction latency and the highest application error rate.
+3. **Inefficient inventory searches in `catalog-service-prod`** are producing full-table scans and database-query timeouts.
 
-10:14:12
-10:14:24
-10:14:58
+The most urgent issue by maximum transaction duration is the payment gateway, which reaches **6.89 seconds at P99**. The checkout flow is also a significant concern because database locking pushes P99 latency to **5.12 seconds**. The catalog search reaches **3.80 seconds at P99** and requires database-query optimization.
 
-Therefore:
-
-Duration = 46 seconds
-
-sess_99104 contains HTTP 500 and 504 checkout failures, so its outcome is Failed.
-
-5. Security & Operational Analysis
-
-Replace the existing comment in section 5 with:
-
-The analysis identified cust_104 using session sess_99104 as the user session experiencing repeated checkout failures. The session generated three checkout requests, including HTTP 500 and HTTP 504 errors, with response times of 5120 ms, 5280 ms, and 5150 ms. This represents both repeated server-side failures and very high checkout latency.
-
-Another failed checkout request was generated by cust_218 in session sess_55219, which returned HTTP 500 with a response time of 5090 ms.
-
-The most active client IP addresses were 198.51.100.22 and 203.0.113.41, with three requests each.
-
-From an operational monitoring perspective, alerts should be configured for repeated HTTP 500/504 responses and unusually high checkout response times. Repeated checkout failures within the same session should be treated as a high-priority condition because they directly affect the completion of user transactions.
-
-
-Then you can proceed with the assessment/evaluation step.
-
+Addressing external-call resiliency, database lock duration, and inefficient search queries should reduce P95/P99 latency, lower HTTP 5xx failures, and improve overall application reliability.
