@@ -1,142 +1,242 @@
-# New Relic NRQL Querying & Performance Audit Report
+# Grafana Panel Development & Threshold Analysis Report
 
-## 1. Top Slowest Transactions Audit
+## 1. Dashboard Architecture & Panel Overview
 
-The transaction dataset was reviewed to identify the slowest database and web transactions across the monitored production applications. The analysis focuses on overall transaction duration, database duration, external-service duration, HTTP response status, errors, and the primary performance bottleneck.
+The `grafana_dashboard_panels.json` file defines the **E-Commerce Core Services Golden Signals Dashboard**. The dashboard uses the `Prometheus-Prod` datasource and includes four core observability panels for monitoring latency, CPU utilization, HTTP errors, and request throughput.
 
-### Transaction 1
+### Panel 1
 
-- **Name:** `WebTransaction/Express/chargeCard`
-- **Application:** `payment-gateway-prod`
-- **Max Duration (s):** 6.89
-- **External Duration (s):** 6.55
-- **HTTP Status / Error:** HTTP 500 / `GatewayTimeoutException: Payment upstream provider unresponsive`
-- **External Call:** `POST https://api.stripe.com/v1/charges`
-- **Primary Bottleneck:** External payment gateway latency. Most of the 6.89-second transaction duration is spent waiting on the external payment provider.
+- **Title:** P95 API Latency (ms)
+- **Visualization Type:** Time Series
+- **PromQL Expression:** Uses `histogram_quantile(0.95, ...)` over `http_request_duration_seconds_bucket`, filtered using the `$env` and `$service` dashboard variables.
+- **Measured Metric:** 95th-percentile API request latency by service, displayed in milliseconds.
+- **Legend Format:** `{{service}} p95`
+- **Unit:** Milliseconds
+- **Purpose:** Identifies services experiencing high tail latency. P95 represents the latency below which approximately 95% of requests complete.
 
-### Transaction 2
+### Panel 2
 
-- **Name:** `WebTransaction/SpringController/checkout`
-- **Application:** `order-service-prod`
-- **Max Duration (s):** 5.12
-- **Database Duration (s):** 4.60
-- **HTTP Status / Error:** HTTP 504 / `Lock wait timeout exceeded; try restarting transaction`
-- **Database Statement:** `SELECT * FROM orders WHERE customer_id = ? FOR UPDATE`
-- **Primary Bottleneck:** Database row-lock contention. The database accounts for most of the transaction duration, and the `FOR UPDATE` operation is associated with the lock-wait timeout.
+- **Title:** CPU Utilization (%)
+- **Visualization Type:** Gauge
+- **PromQL Expression:** Uses CPU idle time from `node_cpu_seconds_total` with `rate()` and calculates utilization using a `100 - idle percentage` approach.
+- **Measured Metric:** CPU utilization percentage by instance.
+- **Legend Format:** `{{instance}}`
+- **Unit:** Percent
+- **Minimum Value:** 0
+- **Maximum Value:** 100
+- **Purpose:** Displays the percentage of available CPU capacity currently being utilized by each monitored instance.
 
-### Transaction 3
+### Panel 3
 
-- **Name:** `WebTransaction/FastAPI/searchInventory`
-- **Application:** `catalog-service-prod`
-- **Max Duration (s):** 3.80
-- **Database Duration (s):** 3.55
-- **HTTP Status / Error:** HTTP 500 / `QueryExecutionTimeout: Full table scan exceeded 3000ms threshold`
-- **Database Statement:** `SELECT * FROM inventory WHERE title LIKE '%boots%' AND stock > 0`
-- **Primary Bottleneck:** Database full-table scan caused by the wildcard search condition. Almost the entire transaction duration is spent in the database query.
+- **Title:** HTTP Error Rate (%)
+- **Visualization Type:** Stat
+- **PromQL Expression:** Calculates the rate of HTTP requests matching `5..` server-error status codes and compares the error traffic with total HTTP request traffic, filtered using `$env` and `$service`.
+- **Measured Metric:** HTTP 5xx error rate as a percentage.
+- **Legend Format:** `Error Rate %`
+- **Unit:** Percent
+- **Purpose:** Provides immediate visibility into backend/server-side HTTP failures and helps identify services with elevated error rates.
 
----
+### Panel 4
 
-## 2. NRQL Query Formulations
-
-The following NRQL queries can be used in New Relic to analyze transaction duration, latency percentiles, and application error-rate trends.
-
-### Query 1: Top 10 Slowest Transactions by Average Duration
-
-```sql
-SELECT average(duration)
-FROM Transaction
-FACET name
-LIMIT 10
-```
-
-**Purpose:**  
-This query calculates the average duration of each transaction and returns the top 10 transaction names. It can be used to identify the transaction endpoints that consistently consume the most processing time.
-
-### Query 2: Duration Percentile Aggregations (P50, P90, P95, P99)
-
-```sql
-SELECT percentile(duration, 50, 90, 95, 99)
-FROM Transaction
-FACET name
-```
-
-**Purpose:**  
-This query measures transaction latency using percentile values. P50 represents typical performance, while P90, P95, and P99 reveal progressively slower transaction behavior and help identify latency experienced by the slowest requests.
-
-### Query 3: Time-Series Error Rate Trends
-
-```sql
-SELECT percentage(count(*), WHERE error IS true)
-FROM Transaction
-FACET appName
-TIMESERIES
-```
-
-**Purpose:**  
-This query calculates the percentage of transactions containing errors and plots the results over time for each application. It helps identify error spikes and determine which production service is experiencing the greatest reliability impact.
+- **Title:** Order Processing Throughput (req/sec)
+- **Visualization Type:** Bar Gauge
+- **PromQL Expression:** `sum by (service) (rate(http_requests_total{env="$env", service=~"$service"...}))`
+- **Measured Metric:** HTTP request throughput grouped by service.
+- **Legend Format:** `{{service}}`
+- **Unit:** Requests per second
+- **Purpose:** Shows the rate at which the monitored services are processing incoming requests and makes it easier to identify low or unusually high traffic conditions.
 
 ---
 
-## 3. Latency Percentile Distribution
+## 2. Query Transformations & Aggregations
 
-The aggregated metrics show significant differences between normal transaction performance and tail latency.
+### 1. Purpose and Mode of the Transformation Applied to Panel 1
 
-| Metric Dimension | P50 (s) | P90 (s) | P95 (s) | P99 (s) | Operational Assessment |
-|---|---:|---:|---:|---:|---|
-| `WebTransaction/SpringController/checkout` | 0.85 | 3.20 | 4.82 | 5.12 | High database-related tail latency. The large increase from P50 to P99 is consistent with the observed row-lock contention. |
-| `WebTransaction/Express/chargeCard` | 0.65 | 2.50 | 3.45 | 6.89 | Severe P99 latency caused primarily by the external payment-provider call. |
-| `WebTransaction/FastAPI/searchInventory` | 0.35 | 1.95 | 2.95 | 3.80 | Database query performance deteriorates significantly at higher percentiles because of full-table scanning. |
-| `WebTransaction/SpringController/getOrderHistory` | 0.22 | 0.95 | 1.45 | 1.85 | Moderate tail-latency increase, but substantially better than checkout, chargeCard, and searchInventory. |
-| `WebTransaction/FastAPI/getProductDetails` | 0.05 | 0.10 | 0.12 | 0.15 | Healthy and consistent transaction latency with minimal difference between normal and P99 response times. |
+- **Transformation Name:** `labelsToFields`
+- **Transformation Mode:** `columns`
+- **Operational Function:** Converts Prometheus label values into separate fields/columns so individual services can be represented clearly in the Grafana time-series visualization.
 
-### Error Rate Summary
+The transformation improves readability when the Prometheus query returns multiple labeled time series. In this dashboard, the service label can be represented as separate output fields for comparison in the latency panel.
 
-| Application | Error Rate |
-|---|---:|
-| `order-service-prod` | 3.85% |
-| `payment-gateway-prod` | 4.50% |
-| `catalog-service-prod` | 2.10% |
+### 2. Purpose of the Mathematical Multiplier (`* 1000`) Applied to the Prometheus Query
 
-Among the three applications, `payment-gateway-prod` has the highest recorded error rate at **4.50%**, followed by `order-service-prod` at **3.85%** and `catalog-service-prod` at **2.10%**.
+- **Raw Metric Units:** Seconds
+- **Displayed Metric Units:** Milliseconds
+- **Explanation:** The Prometheus histogram metric `http_request_duration_seconds_bucket` represents request-duration observations using seconds. The result calculated by `histogram_quantile(0.95, ...)` therefore represents latency in seconds. The dashboard requires P95 latency to be displayed in milliseconds, so the query result is multiplied by 1000.
 
----
+The conversion is:
 
-## 4. Root Cause Diagnosis & Remediation Strategy
+**Milliseconds = Seconds × 1000**
 
-### 1. Database Row Lock Contention (`orders` table)
+For example:
 
-- **Finding:** The `order-service-prod` checkout transaction reached **5.12 seconds**, with approximately **4.60 seconds** spent in database processing. A failing transaction returned HTTP **504** with the message `Lock wait timeout exceeded; try restarting transaction`. The SQL statement uses `SELECT * FROM orders WHERE customer_id = ? FOR UPDATE`.
+**0.5 seconds × 1000 = 500 milliseconds**
 
-- **Root Cause:** The `FOR UPDATE` operation locks matching rows while a transaction is active. Concurrent checkout requests attempting to access the same rows can therefore wait for existing locks to be released. Long transactions or high concurrency can increase lock contention and produce timeout failures.
-
-- **Recommendation:** Reduce the amount of work performed while the database lock is held, commit or roll back transactions as quickly as possible, and review indexing on the `customer_id` lookup to minimize the number of rows involved in locking. Application retry handling should also be considered for transient lock-wait failures.
-
-### 2. External Gateway Latency (`Stripe API`)
-
-- **Finding:** The `payment-gateway-prod` chargeCard transaction reached **6.89 seconds**, of which approximately **6.55 seconds** was external-service duration. The failed transaction returned HTTP **500** and reported `GatewayTimeoutException: Payment upstream provider unresponsive`.
-
-- **Root Cause:** The application is spending most of the transaction waiting for the external payment-provider request rather than processing locally. This makes the transaction highly dependent on upstream payment-service response latency.
-
-- **Recommendation:** Configure appropriate connection and request timeouts for the payment-provider call. Implement controlled retries with exponential backoff for transient failures and use circuit-breaker protection so prolonged upstream failures do not exhaust application resources. Payment operations should use idempotency mechanisms when retrying requests to prevent duplicate processing.
-
-### 3. Full Table Scan on Catalog (`LIKE '%...'`)
-
-- **Finding:** `WebTransaction/FastAPI/searchInventory` reached **3.80 seconds**, including approximately **3.55 seconds** of database processing. The failed transaction reported `QueryExecutionTimeout: Full table scan exceeded 3000ms threshold`. The query contains a search pattern such as `title LIKE '%boots%'`.
-
-- **Root Cause:** A leading wildcard (`%`) generally prevents a conventional index on `title` from efficiently locating matching rows. As the inventory table grows, scanning a large portion of the table increases query latency and database resource utilization.
-
-- **Recommendation:** Replace the leading-wildcard search pattern where possible and use a search/indexing strategy appropriate for substring or full-text searches. Review the database execution plan before and after optimization. If substring searches are an application requirement, use the database platform's supported full-text-search capability rather than relying on repeated full-table scans.
+This ensures that Panel 1 can display P95 API latency using the `ms` configuration defined in the panel.
 
 ---
 
-## 5. Overall Performance Assessment
+## 3. Threshold Color Schemes & Tiers
 
-The performance analysis identifies three primary production risks:
+The dashboard uses threshold colors to make abnormal operating conditions visually identifiable.
 
-1. **Database contention in `order-service-prod`** is increasing checkout latency and generating lock-wait failures.
-2. **External payment-provider latency in `payment-gateway-prod`** is creating the highest observed transaction latency and the highest application error rate.
-3. **Inefficient inventory searches in `catalog-service-prod`** are producing full-table scans and database-query timeouts.
+| Panel Name | Metric Unit | Nominal (Green) | Warning (Yellow/Orange) | Critical (Red) |
+|---|---|---|---|---|
+| P95 API Latency | ms | Below 500 ms | 500 ms to below 1000 ms | 1000 ms and above |
+| CPU Utilization | % | Normal CPU utilization range | Elevated CPU utilization | High/critical CPU utilization |
+| HTTP Error Rate | % | Below 1% | 1% to below 5% | 5% and above |
 
-The most urgent issue by maximum transaction duration is the payment gateway, which reaches **6.89 seconds at P99**. The checkout flow is also a significant concern because database locking pushes P99 latency to **5.12 seconds**. The catalog search reaches **3.80 seconds at P99** and requires database-query optimization.
+### P95 API Latency
 
-Addressing external-call resiliency, database lock duration, and inefficient search queries should reduce P95/P99 latency, lower HTTP 5xx failures, and improve overall application reliability.
+The JSON configuration defines:
+
+- **Green:** Base/normal condition
+- **Yellow:** Starts at 500 ms
+- **Red:** Starts at 1000 ms
+
+Therefore:
+
+- Below 500 ms = Nominal
+- 500–999 ms = Warning
+- 1000 ms and above = Critical
+
+This threshold scheme highlights services approaching or exceeding one second of P95 request latency.
+
+### CPU Utilization
+
+The CPU panel is configured as a percentage gauge with:
+
+- **Minimum:** 0%
+- **Maximum:** 100%
+
+The gauge provides a direct view of CPU utilization by instance. Increasing CPU utilization represents decreasing available CPU headroom. Threshold colors should therefore progress from normal to warning and critical as CPU utilization approaches the upper end of the 0–100% range.
+
+### HTTP Error Rate
+
+The JSON configuration defines:
+
+- **Green:** Base/normal condition
+- **Yellow:** Starts at 1.0%
+- **Red:** Starts at 5.0%
+
+Therefore:
+
+- Below 1% = Nominal
+- 1% to below 5% = Warning
+- 5% and above = Critical
+
+The HTTP error-rate panel therefore makes persistent server-side failures immediately visible.
+
+---
+
+## 4. Dynamic Template Variables Configuration
+
+The dashboard includes two template variables: `$env` and `$service`. These variables allow the dashboard user to dynamically filter the Prometheus queries without modifying the panel definitions.
+
+### Variable 1 (`$env`)
+
+- **Type:** Custom
+- **Label:** Environment
+- **Configured Options:**
+  - `production`
+  - `staging`
+  - `development`
+- **Default/Current Value:** `production`
+- **Filtering Function:** The selected environment is passed into Prometheus label filters using `env="$env"`.
+
+For example, when `production` is selected, queries operate on metrics associated with the production environment.
+
+Using a dashboard-level environment variable allows the same dashboard panels to be reused for multiple deployment environments.
+
+### Variable 2 (`$service`)
+
+- **Type:** Query
+- **Label:** Service Name
+- **Datasource:** `Prometheus-Prod`
+- **Query Definition:** `label_values(http_requests_total{env="$env"}, service)`
+- **Multi-Value Enabled?:** YES
+- **Include All Option?:** YES
+- **Current Selection:** All
+- **Regex Matcher in Queries:** `service=~"$service"`
+
+The `$service` variable is populated dynamically from the `service` label associated with `http_requests_total`.
+
+The query also depends on `$env`. Therefore, changing the selected environment causes the available service values to correspond to the chosen environment.
+
+Multi-value support allows multiple services to be selected simultaneously.
+
+Because multiple values or the **All** option can be selected, dashboard queries use the Prometheus regex matcher:
+
+`service=~"$service"`
+
+instead of a strict equality matcher.
+
+This configuration allows the dashboard to display one service, multiple selected services, or the full service set.
+
+---
+
+## 5. Reliability & Alerting Recommendations
+
+### 1. Alert Rule Configuration
+
+- **Recommendation:** Create Grafana alert rules that correspond to the important warning and critical thresholds already defined in the dashboard panels.
+
+The P95 API latency configuration identifies:
+
+- Warning condition beginning at **500 ms**
+- Critical condition beginning at **1000 ms**
+
+The HTTP error-rate configuration identifies:
+
+- Warning condition beginning at **1%**
+- Critical condition beginning at **5%**
+
+Rather than relying only on dashboard colors, Grafana alerting should evaluate these conditions continuously.
+
+To reduce alert noise, the threshold should remain breached for an appropriate evaluation period before generating a notification. For example, a short single-sample increase should not necessarily generate a production incident, while a sustained critical condition should.
+
+Alert rules should include useful labels such as:
+
+- Environment
+- Service
+- Instance
+- Severity
+
+Notifications can then be routed according to severity and affected service.
+
+This approach allows the Grafana dashboard to provide visual monitoring while Grafana alerting provides proactive notification when an important service condition remains outside its expected operating range.
+
+### 2. Dashboard Auto-Refresh Interval
+
+- **Current Dashboard Configuration:** `10s`
+- **Recommendation:** Retain the 10-second refresh interval for this operational Golden Signals dashboard if the Prometheus collection interval provides comparably fresh data.
+
+A 10-second refresh gives operators frequent updates for:
+
+- P95 API latency
+- CPU utilization
+- HTTP error rate
+- Request throughput
+
+However, the dashboard refresh interval should not be confused with Prometheus scraping or Grafana alert evaluation. Refreshing the visualization every 10 seconds does not create newer metrics if Prometheus itself is collecting data less frequently.
+
+For a production environment with many concurrent dashboard users, excessively frequent refresh intervals can also increase load on Grafana and Prometheus.
+
+Therefore, the configured **10-second refresh interval** is suitable for active operational monitoring where rapid feedback is needed, while alert rules should use their own evaluation intervals and sustained-condition logic.
+
+---
+
+## Overall Analysis
+
+The **E-Commerce Core Services Golden Signals Dashboard** provides coverage of four major operational signals:
+
+1. **Latency:** P95 API latency identifies slow service responses and tail-latency degradation.
+2. **Resource Utilization:** CPU utilization identifies instances experiencing high compute demand.
+3. **Errors:** HTTP error rate identifies increases in server-side 5xx failures.
+4. **Traffic/Throughput:** Order-processing throughput shows how many requests services process per second.
+
+The `$env` and `$service` template variables make the dashboard reusable across different deployment environments and service selections.
+
+Threshold-based coloring makes abnormal conditions easy to identify visually. The dashboard should be complemented with Grafana alert rules using the same operational thresholds so warning and critical conditions generate proactive notifications rather than requiring continuous manual dashboard observation.
+
+Overall, the dashboard provides a structured Grafana and Prometheus monitoring view for evaluating the performance, reliability, utilization, and traffic characteristics of the E-Commerce Core Services environment.
