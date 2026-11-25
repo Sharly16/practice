@@ -1,229 +1,157 @@
-# PromQL Instant vs Range Vector Calculations Report
-
-## 1. Instant Vector vs. Range Vector Conceptual Comparison
-
-Prometheus Query Language (PromQL) works with both instant vectors and range vectors. Understanding the difference is important when working with counters, rates, increases, and histogram calculations.
-
-### Instant Vector
-
-- **Definition:** An instant vector contains one sample for each selected time series at a single evaluation timestamp. It represents the most recent value available for the selected metric at that point in time.
-- **Example Expression:** `http_requests_total{job="api-gateway"}`
-- **Direct Visualization Compatibility:** YES. Instant vectors can be returned directly by PromQL and displayed in Grafana as the current value of each selected time series.
-
-### Range Vector
-
-- **Definition:** A range vector contains multiple samples from each selected time series over a specified historical time interval.
-- **Example Expression:** `http_requests_total{job="api-gateway"}[15m]`
-- **Required Aggregation Functions:** Range vectors are normally processed using functions such as `rate()`, `increase()`, `avg_over_time()`, `sum_over_time()`, `min_over_time()`, or `max_over_time()` before being used for operational calculations.
-
-The main difference is that an instant vector represents values at one evaluation point, while a range vector provides historical samples across a time window. Functions such as `rate()` and `increase()` require a range vector because the calculation depends on how a counter changes over time.
-
----
-
-## 2. Request Rate & Increase Calculations
-
-The dataset contains `http_requests_total` counter metrics for the `api-gateway` job. The recorded window is 15 minutes, or 900 seconds.
-
-### Query 1: Per-Second Request Rate on `/checkout` (Status 200)
-
-- **PromQL Expression:**
-
-`rate(http_requests_total{job="api-gateway",method="POST",handler="/checkout",status="200"}[15m])`
-
-- **Calculation Formula & Working:**
-
-Initial counter value = 12,500
-
-Final counter value = 17,900
-
-Recorded time window = 15 minutes = 900 seconds
-
-Counter increase:
-
-`17900 - 12500 = 5400 requests`
-
-Per-second request rate:
-
-`5400 / 900 = 6 requests/second`
-
-- **Calculated Request Rate (req/sec):** **6.0 req/sec**
-
-The `/checkout` endpoint therefore processed an average of 6 successful requests per second during the recorded 15-minute window.
-
-### Query 2: Total Request Increase on `/products` over 15 minutes
-
-- **PromQL Expression:**
-
-`increase(http_requests_total{job="api-gateway",method="GET",handler="/products",status="200"}[15m])`
-
-- **Calculation Working:**
-
-Initial counter value = 85,000
-
-Final counter value = 104,200
-
-Total increase:
-
-`104200 - 85000 = 19200 requests`
-
-- **Total Request Increase:** **19,200 requests**
-
-The `/products` endpoint therefore processed 19,200 additional successful GET requests during the 15-minute recording period.
-
-### Query 3: Error Rate Percentage on `/checkout`
-
-The dataset contains a separate `http_requests_total` counter for `/checkout` requests returning HTTP status 500.
-
-The error counter changed from:
-
-Initial value = 45
-
-Final value = 420
-
-Error increase:
-
-`420 - 45 = 375 errors`
-
-Error request rate:
-
-`375 / 900 = 0.4167 errors/second`
-
-The successful `/checkout` request rate is:
-
-`6.0 requests/second`
-
-- **PromQL Expression:**
-
-`100 * rate(http_requests_total{job="api-gateway",handler="/checkout",status="500"}[15m]) / rate(http_requests_total{job="api-gateway",handler="/checkout"}[15m])`
-
-Using the visible successful and error counter increases, total observed `/checkout` requests during the window are:
-
-`5400 + 375 = 5775`
-
-The calculated error percentage is:
-
-`(375 / 5775) * 100`
-
-`= 6.49%`
-
-- **Calculated Error Percentage (%):** **Approximately 6.49%**
-
-This means approximately 6.49% of the observed `/checkout` requests during the recording window resulted in HTTP 500 server errors.
-
----
-
-## 3. Histogram Quantile Calculation (P99 & P95)
-
-Prometheus histogram metrics organize request observations into cumulative buckets. The dataset contains the following cumulative histogram counts:
-
-| Bucket (`le`) | Cumulative Count |
-|---|---:|
-| 0.05 seconds | 1,200 |
-| 0.10 seconds | 3,400 |
-| 0.25 seconds | 7,800 |
-| 0.50 seconds | 12,100 |
-| 1.00 seconds | 14,900 |
-| 2.50 seconds | 15,600 |
-| 5.00 seconds | 15,750 |
-
-The supplied expected calculations identify:
-
-- **P99 latency:** 2.15 seconds
-- **P95 latency:** 0.88 seconds
-
-### A. P99 Latency Calculation
-
-- **PromQL Expression:**
-
-`histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[15m])))`
-
-- **Target Bucket Interval:** **1.00 seconds to 2.50 seconds**
-- **Calculated P99 Latency (seconds):** **2.15 seconds**
-
-The 99th percentile falls within the histogram interval above 1.00 second and up to 2.50 seconds. The histogram quantile calculation uses interpolation within the cumulative histogram buckets to estimate the latency value.
-
-Operationally, a P99 latency of 2.15 seconds means approximately 99% of the observed requests complete within about 2.15 seconds, while approximately 1% take longer.
-
-### B. P95 Latency Calculation
-
-- **PromQL Expression:**
-
-`histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[15m])))`
-
-- **Target Bucket Interval:** **0.50 seconds to 1.00 second**
-- **Calculated P95 Latency (seconds):** **0.88 seconds**
-
-The 95th-percentile request falls inside the histogram interval above 0.50 seconds and up to 1.00 second. Prometheus estimates the quantile by interpolating between the cumulative histogram bucket boundaries.
-
-Operationally, a P95 latency of 0.88 seconds indicates that approximately 95% of the observed requests complete within 0.88 seconds, while the slowest 5% require more time.
-
-The difference between P95 at 0.88 seconds and P99 at 2.15 seconds also indicates noticeable tail latency among the slowest requests.
-
----
-
-## 4. Label Matching & Aggregation Operators (`by`, `without`)
-
-PromQL aggregation operators control which labels remain after time-series aggregation.
-
-### Query using `by (handler)`
-
-- **Syntax:**
-
-`sum by (handler) (rate(http_requests_total[5m]))`
-
-- **Dimensional Effect:** The query groups all matching request time series according to their `handler` label. Other dimensions are aggregated away for this calculation. A separate result is returned for each handler, such as `/checkout` or `/products`.
-
-This expression is useful when request throughput needs to be compared at endpoint level.
-
-For example, series that have different `method`, `status`, or `instance` labels but share the same `handler` can be combined into one handler-level result.
-
-### Query using `without (instance)`
-
-- **Syntax:**
-
-`sum without (instance) (rate(http_requests_total[5m]))`
-
-- **Dimensional Effect:** The query aggregates across the `instance` dimension while retaining other applicable labels.
-
-This is useful when multiple application instances expose the same HTTP metric and the operational requirement is to view an overall service result instead of separate values for every instance.
-
-### Difference Between `by` and `without`
-
-`by()` explicitly identifies the labels that should remain after aggregation.
-
-`without()` explicitly identifies the labels that should be removed during aggregation.
-
-For example:
-
-`sum by (handler) (...)`
-
-focuses the output on the handler dimension.
-
-Whereas:
-
-`sum without (instance) (...)`
-
-removes the instance dimension while preserving the remaining relevant dimensions.
-
-These operators help control time-series cardinality and ensure that Prometheus metrics are aggregated according to the operational view required by dashboards and alerts.
-
----
-
-## Summary
-
-The PromQL analysis demonstrated the correct use of instant vectors, range vectors, counter functions, histogram quantiles, and label-based aggregation.
-
-Key results from the supplied dataset are:
-
-- `/checkout` successful request rate: **6.0 requests/second**
-- `/checkout` HTTP 500 error rate: **0.4167 errors/second**
-- `/checkout` calculated error percentage: **approximately 6.49%**
-- `/products` total successful request increase: **19,200 requests**
-- P95 request latency: **0.88 seconds**
-- P99 request latency: **2.15 seconds**
-
-The `rate()` function is appropriate for determining the average per-second rate of counter growth, while `increase()` determines the total counter increase across the selected range.
-
-The `histogram_quantile()` function converts cumulative Prometheus histogram bucket observations into estimated percentile values such as P95 and P99.
-
-Finally, PromQL aggregation modifiers such as `by()` and `without()` control which metric-label dimensions are retained or removed, allowing Prometheus data to be shaped appropriately for dashboards, operational analysis, and alerting.
+{
+  "metadata": {
+    "application_insights_resource": "appin-ecommerce-prod-eastus",
+    "subscription_id": "sub-az-892341",
+    "time_range": "ago(24h)",
+    "schema_version": "Azure-AppInsights-v2"
+  },
+  "requests": [
+    {
+      "id": "req-101",
+      "timestamp": "2026-11-12T08:14:22Z",
+      "name": "POST /api/v2/orders/checkout",
+      "success": false,
+      "resultCode": "500",
+      "duration_ms": 3240.5,
+      "cloud_RoleName": "OrderingMicroservice",
+      "operation_Id": "op-8921-az",
+      "user_AuthenticatedId": "user_4491"
+    },
+    {
+      "id": "req-102",
+      "timestamp": "2026-11-12T08:14:45Z",
+      "name": "POST /api/v2/orders/checkout",
+      "success": false,
+      "resultCode": "500",
+      "duration_ms": 3180.2,
+      "cloud_RoleName": "OrderingMicroservice",
+      "operation_Id": "op-8922-az",
+      "user_AuthenticatedId": "user_4492"
+    },
+    {
+      "id": "req-103",
+      "timestamp": "2026-11-12T08:15:10Z",
+      "name": "GET /api/v2/catalog/items",
+      "success": true,
+      "resultCode": "200",
+      "duration_ms": 45.8,
+      "cloud_RoleName": "CatalogMicroservice",
+      "operation_Id": "op-8923-az",
+      "user_AuthenticatedId": "anon_9912"
+    },
+    {
+      "id": "req-104",
+      "timestamp": "2026-11-12T08:16:02Z",
+      "name": "GET /api/v2/inventory/status",
+      "success": true,
+      "resultCode": "200",
+      "duration_ms": 112.4,
+      "cloud_RoleName": "InventoryMicroservice",
+      "operation_Id": "op-8924-az",
+      "user_AuthenticatedId": "user_4491"
+    },
+    {
+      "id": "req-105",
+      "timestamp": "2026-11-12T08:16:55Z",
+      "name": "POST /api/v2/orders/checkout",
+      "success": false,
+      "resultCode": "504",
+      "duration_ms": 5012.0,
+      "cloud_RoleName": "OrderingMicroservice",
+      "operation_Id": "op-8925-az",
+      "user_AuthenticatedId": "user_4495"
+    }
+  ],
+  "exceptions": [
+    {
+      "timestamp": "2026-11-12T08:14:22.450Z",
+      "problemId": "System.Data.SqlClient.SqlException at OrderingMicroservice.Repositories.OrderRepository.SaveOrderAsync",
+      "handledAt": "UserCode",
+      "type": "System.Data.SqlClient.SqlException",
+      "assembly": "OrderingMicroservice.dll",
+      "method": "OrderRepository.SaveOrderAsync",
+      "message": "Execution Timeout Expired. The timeout period elapsed prior to completion of the operation or the server is not responding.",
+      "operation_Id": "op-8921-az",
+      "severityLevel": 3
+    },
+    {
+      "timestamp": "2026-11-12T08:14:45.320Z",
+      "problemId": "System.Data.SqlClient.SqlException at OrderingMicroservice.Repositories.OrderRepository.SaveOrderAsync",
+      "handledAt": "UserCode",
+      "type": "System.Data.SqlClient.SqlException",
+      "assembly": "OrderingMicroservice.dll",
+      "method": "OrderRepository.SaveOrderAsync",
+      "message": "Execution Timeout Expired. The timeout period elapsed prior to completion of the operation or the server is not responding.",
+      "operation_Id": "op-8922-az",
+      "severityLevel": 3
+    },
+    {
+      "timestamp": "2026-11-12T08:16:55.100Z",
+      "problemId": "System.Net.Http.HttpRequestException at OrderingMicroservice.Services.PaymentGatewayClient.AuthorizeCharge",
+      "handledAt": "Platform",
+      "type": "System.Net.Http.HttpRequestException",
+      "assembly": "OrderingMicroservice.dll",
+      "method": "PaymentGatewayClient.AuthorizeCharge",
+      "message": "The remote server returned an error: (504) Gateway Timeout.",
+      "operation_Id": "op-8925-az",
+      "severityLevel": 3
+    }
+  ],
+  "dependencies": [
+    {
+      "id": "dep-501",
+      "target": "sql-ecommerce-prod.database.windows.net | OrderDb",
+      "type": "SQL",
+      "name": "sp_InsertCustomerOrder",
+      "data": "EXEC sp_InsertCustomerOrder @CustomerId=4491, @Total=189.50",
+      "duration_ms": 3050.0,
+      "success": false,
+      "resultCode": "Timeout",
+      "operation_Id": "op-8921-az"
+    },
+    {
+      "id": "dep-502",
+      "target": "sql-ecommerce-prod.database.windows.net | OrderDb",
+      "type": "SQL",
+      "name": "sp_InsertCustomerOrder",
+      "data": "EXEC sp_InsertCustomerOrder @CustomerId=4492, @Total=74.20",
+      "duration_ms": 3020.0,
+      "success": false,
+      "resultCode": "Timeout",
+      "operation_Id": "op-8922-az"
+    },
+    {
+      "id": "dep-503",
+      "target": "cosmosdb-catalog-prod.documents.azure.com",
+      "type": "Azure DocumentDB",
+      "name": "GetItemsList",
+      "data": "SELECT * FROM c WHERE c.active = true",
+      "duration_ms": 12.5,
+      "success": true,
+      "resultCode": "200",
+      "operation_Id": "op-8923-az"
+    },
+    {
+      "id": "dep-504",
+      "target": "redis-cache-prod.redis.cache.windows.net:6380",
+      "type": "Redis",
+      "name": "GET sku_inventory_441",
+      "data": "GET sku_inventory_441",
+      "duration_ms": 3.2,
+      "success": true,
+      "resultCode": "200",
+      "operation_Id": "op-8924-az"
+    },
+    {
+      "id": "dep-505",
+      "target": "https://payments.partner-api.com",
+      "type": "HTTP",
+      "name": "POST /charges/authorize",
+      "data": "POST https://payments.partner-api.com/v1/charge",
+      "duration_ms": 4980.0,
+      "success": false,
+      "resultCode": "504",
+      "operation_Id": "op-8925-az"
+    }
+  ]
+}
