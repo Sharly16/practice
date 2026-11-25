@@ -1,176 +1,133 @@
-{
-  "dashboard_spec": {
-    "title": "Enterprise Operations Center - Core Platform Golden Signals",
-    "target_audience": "NOC Operators, SRE Incident Commanders, Engineering Leadership",
-    "refresh_cadence": "15s",
-    "layout_hierarchy": [
-      {
-        "row_index": 1,
-        "row_title": "Executive Overview & Global Service Health (Tier 1)",
-        "purpose": "At-a-glance status indicators for executive leadership and NOC triage",
-        "panels": [
-          {
-            "panel_id": "p-101",
-            "name": "Overall Service Level Objective (SLO) Compliance",
-            "visualization_type": "stat",
-            "metric_target": "avg(slo_compliance_ratio) * 100",
-            "unit": "%",
-            "thresholds": {
-              "nominal": ">= 99.9%",
-              "warning": "99.0% - 99.89%",
-              "critical": "< 99.0%"
-            },
-            "alert_status": "green"
-          },
-          {
-            "panel_id": "p-102",
-            "name": "Active P1 / P2 Incidents",
-            "visualization_type": "stat",
-            "metric_target": "count(incidents_active{severity=~'P1|P2'})",
-            "unit": "short",
-            "thresholds": {
-              "nominal": "0",
-              "warning": "1",
-              "critical": ">= 2"
-            },
-            "alert_status": "green"
-          },
-          {
-            "panel_id": "p-103",
-            "name": "Global Request Traffic (RPS)",
-            "visualization_type": "stat",
-            "metric_target": "sum(rate(http_requests_total[1m]))",
-            "unit": "reqps",
-            "thresholds": {
-              "nominal": "> 1000",
-              "warning": "500 - 1000",
-              "critical": "< 500"
-            },
-            "alert_status": "green"
-          }
-        ]
-      },
-      {
-        "row_index": 2,
-        "row_title": "The Four Golden Signals (Tier 2 - Operational Triage)",
-        "purpose": "Primary diagnostic row answering: Is it slow? Is it busy? Is it failing? Is it full?",
-        "panels": [
-          {
-            "panel_id": "p-201",
-            "signal": "Latency",
-            "name": "End-to-End Latency Percentiles (P50, P90, P99)",
-            "visualization_type": "timeseries",
-            "metric_target": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
-            "unit": "ms",
-            "thresholds": {
-              "nominal": "< 400ms",
-              "warning": "400ms - 800ms",
-              "critical": ">= 800ms"
-            }
-          },
-          {
-            "panel_id": "p-202",
-            "signal": "Traffic",
-            "name": "HTTP Request Throughput by Service",
-            "visualization_type": "timeseries",
-            "metric_target": "sum by (service) (rate(http_requests_total[1m]))",
-            "unit": "reqps",
-            "thresholds": {
-              "nominal": "baseline",
-              "warning": "+/- 30% dev",
-              "critical": "+/- 60% dev"
-            }
-          },
-          {
-            "panel_id": "p-203",
-            "signal": "Errors",
-            "name": "HTTP 5xx Error Rate Percentage",
-            "visualization_type": "timeseries",
-            "metric_target": "sum(rate(http_requests_total{status=~'5..'}[5m])) / sum(rate(http_requests_total[5m])) * 100",
-            "unit": "%",
-            "thresholds": {
-              "nominal": "< 0.5%",
-              "warning": "0.5% - 2.0%",
-              "critical": ">= 2.0%"
-            }
-          },
-          {
-            "panel_id": "p-204",
-            "signal": "Saturation",
-            "name": "Cluster Compute & Memory Saturation",
-            "visualization_type": "gauge",
-            "metric_target": "avg by (resource) (node_resource_utilization_ratio * 100)",
-            "unit": "%",
-            "thresholds": {
-              "nominal": "< 75%",
-              "warning": "75% - 85%",
-              "critical": ">= 85%"
-            }
-          }
-        ]
-      },
-      {
-        "row_index": 3,
-        "row_title": "Component & Downstream Dependency Breakdown (Tier 3)",
-        "purpose": "Identify which microservice or database component is driving degradation",
-        "panels": [
-          {
-            "panel_id": "p-301",
-            "name": "Database Connection Pool Utilization",
-            "visualization_type": "bargauge",
-            "metric_target": "db_connections_active / db_connections_max * 100",
-            "unit": "%",
-            "thresholds": {
-              "nominal": "< 70%",
-              "warning": "70% - 85%",
-              "critical": ">= 85%"
-            }
-          },
-          {
-            "panel_id": "p-302",
-            "name": "External Third-Party API Response Times",
-            "visualization_type": "timeseries",
-            "metric_target": "avg by (provider) (external_http_duration_ms)",
-            "unit": "ms",
-            "thresholds": {
-              "nominal": "< 300ms",
-              "warning": "300ms - 1000ms",
-              "critical": ">= 1000ms"
-            }
-          }
-        ]
-      },
-      {
-        "row_index": 4,
-        "row_title": "Deep-Dive Infrastructure Metrics (Tier 4)",
-        "purpose": "Low-level system debugging for infrastructure engineers",
-        "panels": [
-          {
-            "panel_id": "p-401",
-            "name": "JVM Garbage Collection Pause Time",
-            "visualization_type": "timeseries",
-            "metric_target": "sum(rate(jvm_gc_pause_seconds_sum[1m]))",
-            "unit": "s",
-            "thresholds": {
-              "nominal": "< 0.1s",
-              "warning": "0.1s - 0.5s",
-              "critical": ">= 0.5s"
-            }
-          },
-          {
-            "panel_id": "p-402",
-            "name": "Host Disk I/O Queue Depth",
-            "visualization_type": "timeseries",
-            "metric_target": "avg by (device) (node_disk_io_time_weighted_seconds_total)",
-            "unit": "short",
-            "thresholds": {
-              "nominal": "< 2",
-              "warning": "2 - 5",
-              "critical": ">= 5"
-            }
-          }
-        ]
-      }
-    ]
-  }
-}
+Use the following content to complete dashboard_design_report.md. It is based only on the supplied dashboard specification.
+
+Golden Signals Operational Dashboard Layout Design Report
+1. Golden Signals Architectural Mapping
+1. Latency
+Metric: End-to-end HTTP request duration using P50, P90, and P99 percentiles.
+Measurement: P99 latency is calculated from http_request_duration_seconds_bucket.
+Success versus error: Latency should be separated by service and, where available, HTTP status so successful and failed requests can be compared.
+Thresholds: Below 400 ms is nominal, 400–800 ms is warning, and 800 ms or more is critical.
+2. Traffic
+Metric: HTTP requests per second grouped by service.
+Measurement: Traffic is calculated using the one-minute rate of http_requests_total.
+Unit of demand: Requests per second.
+Thresholds: A 30% deviation from baseline is a warning, while a 60% deviation is critical.
+3. Errors
+Metric: Percentage of HTTP requests returning 5xx status codes.
+Measurement: The 5xx request rate is divided by the total request rate and multiplied by 100.
+Classification: Errors are explicitly identified using HTTP statuses matching 5...
+Thresholds: Below 0.5% is nominal, 0.5–2% is warning, and 2% or more is critical.
+4. Saturation
+Metric: Cluster compute and memory utilization.
+Measurement: Average resource utilization percentage grouped by resource.
+Leading indicators: High CPU or memory utilization can indicate capacity exhaustion before service failures occur.
+Thresholds: Below 75% is nominal, 75–85% is warning, and 85% or more is critical.
+2. Visual Layout Hierarchy and Information Flow
+
+The dashboard uses four tiers to support fast NOC triage. Operators begin with global service health and move downward into increasingly detailed diagnostics.
+
+Tier 1: Executive Overview and Global Service Health
+
+Panels:
+
+Overall SLO Compliance
+Active P1/P2 Incidents
+Global Request Traffic
+
+Panel types: Stat panels.
+
+Operational purpose: Provides an immediate overview of business service health. Leadership and NOC operators can quickly determine whether SLOs are being met, whether major incidents are active, and whether global traffic is normal.
+
+Tier 2: The Four Golden Signals
+
+Panels:
+
+End-to-End Latency Percentiles
+HTTP Throughput by Service
+HTTP 5xx Error Rate
+Cluster Compute and Memory Saturation
+
+Panel types: Time-series panels and gauge.
+
+Operational purpose: Answers the four initial incident questions:
+
+Is the platform slow?
+Is traffic increasing or decreasing?
+Is the platform failing?
+Are resources becoming full?
+Tier 3: Component and Dependency Breakdown
+
+Panels:
+
+Database Connection Pool Utilization
+External Third-Party API Response Times
+
+Panel types: Bar gauge and time series.
+
+Operational purpose: Identifies whether degradation originates from database connection exhaustion or a slow external provider.
+
+Tier 4: Deep-Dive Infrastructure Diagnostics
+
+Panels:
+
+JVM Garbage Collection Pause Time
+Host Disk I/O Queue Depth
+
+Panel type: Time series.
+
+Operational purpose: Supports infrastructure engineers during detailed investigation of runtime and host-level performance issues.
+
+3. Panel Thresholding and Alert Indicators
+Signal or Metric	Nominal (Green)	Warning (Yellow/Orange)	Critical (Red)	VisualizationSLO Compliance	≥99.9%	99.0–99.89%	<99.0%	Stat
+P99 Latency	<400 ms	400–800 ms	≥800 ms	Time series
+HTTP 5xx Error Rate	<0.5%	0.5–2.0%	≥2.0%	Time series
+Resource Saturation	<75%	75–85%	≥85%	Gauge
+DB Connection Pool	<70%	70–85%	≥85%	Bar gauge
+
+Additional thresholds include:
+
+Active incidents: zero is green, one is warning, and two or more are critical.
+External API latency: below 300 ms is green, 300–1000 ms is warning, and 1000 ms or more is critical.
+JVM GC pause: below 0.1 seconds is green, 0.1–0.5 seconds is warning, and 0.5 seconds or more is critical.
+Disk I/O queue depth: below 2 is green, 2–5 is warning, and 5 or more is critical.
+
+The dashboard should use green for normal operation, yellow or orange for warning, and red for critical conditions.
+
+4. Cognitive Ergonomics and Anti-Patterns Avoided
+1. Metric Clutter Avoidance
+
+Principle: Only high-priority metrics are displayed in the main dashboard.
+
+Executive indicators are placed at the top, while component and infrastructure metrics appear in lower tiers. This prevents operators from being overwhelmed by low-level data during initial triage.
+
+2. Consistent Color Coding
+
+Principle: The same health colors are used across all panels.
+
+Green indicates normal operation.
+Yellow or orange indicates warning.
+Red indicates critical degradation.
+
+Consistent colors help operators recognize severity without reading every value.
+
+3. Standardized Time Windows
+
+Principle: Related metrics use consistent rate windows and the dashboard refreshes every 15 seconds.
+
+Short windows such as one minute support rapid traffic monitoring, while five-minute windows reduce noise for latency and error-rate calculations. Consistent time ranges prevent misleading comparisons.
+
+Anti-Patterns Avoided
+Too many unrelated panels in one row
+Using different colors for the same severity
+Mixing executive and infrastructure metrics
+Displaying raw counters instead of rates
+Using gauges for historical trends
+Creating alerts without clear thresholds
+Placing detailed metrics above global service health
+Conclusion
+
+The dashboard organizes operational information into four levels: global health, Golden Signals, component dependencies, and infrastructure diagnostics. This structure allows NOC operators and SRE incident commanders to move from detection to root-cause analysis quickly.
+
+The dashboard measures latency, traffic, errors, and saturation using suitable visualizations and clearly defined green, warning, and critical thresholds. The 15-second refresh cadence supports active monitoring, while the hierarchical layout reduces cognitive load and alert fatigue.
+
+Main changes: The incomplete placeholders were filled using the exact rows, panels, thresholds, visualizations, and purposes from the supplied JSON.
