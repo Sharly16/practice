@@ -1,140 +1,116 @@
-
-Azure Kusto Query Language (KQL) Exception Tracking Report
-1. KQL Investigation Queries
-Query 1: Filter Failing Requests with Error Details
-requests
-| where timestamp >= ago(24h)
-| where success == false
-| project timestamp, id, name, resultCode, duration, cloud_RoleName, operation_Id, user_AuthenticatedId
-| order by timestamp asc
-
-
-This query filters unsuccessful requests from the last 24 hours and displays the request name, result code, duration, service name, operation ID, and affected user.
-
-Query 2: Correlate Requests with Exceptions Using Join
-requests
-| where timestamp >= ago(24h)
-| where success == false
-| join kind=inner (
-    exceptions
-    | where timestamp >= ago(24h)
-    | project operation_Id, ExceptionType=type, MethodName=method,
-              ExceptionMessage=message, handledAt, severityLevel
-) on operation_Id
-| project timestamp, operation_Id, RequestName=name, resultCode,
-          duration, cloud_RoleName, ExceptionType, MethodName,
-          ExceptionMessage, handledAt, severityLevel
-| order by timestamp asc
-
-
-This query performs an inner join using operation_Id. It connects each failed request with the corresponding exception.
-
-Query 3: Dependency Failure Rate and Duration Mapping
-dependencies
-| where timestamp >= ago(24h)
-| summarize
-    TotalCalls=count(),
-    FailedCalls=countif(success == false),
-    FailureRate=round(100.0 * countif(success == false) / count(), 2),
-    AverageDurationMs=round(avg(duration), 2)
-    by target, type
-| extend OperationalHealth=case(
-    FailureRate >= 50, "Critical",
-    FailureRate > 0, "Degraded",
-    "Healthy"
-)
-| order by FailureRate desc
-
-
-This query groups dependencies by target and type, calculates total calls, failed calls, failure percentage, average duration, and operational health.
-
-Query 4: Time-Series Error Render
-requests
-| where timestamp >= ago(24h)
-| where success == false
-| summarize ErrorCount=count() by bin(timestamp, 5m), cloud_RoleName
-| render timechart
-
-
-This query displays failed requests as a time-series chart using five-minute intervals.
-
-2. Request-to-Exception Correlation Breakdown
-Operation ID	Request Name	Result Code	Exception Class	Method Name	Root-Cause Messageop-8921-az	POST /api/v2/orders/checkout	500	System.Data.SqlClient.SqlException	OrderRepository.SaveOrderAsync	SQL execution timed out before the operation completed or the server did not respond.
-op-8922-az	POST /api/v2/orders/checkout	500	System.Data.SqlClient.SqlException	OrderRepository.SaveOrderAsync	SQL execution timed out before the operation completed or the server did not respond.
-op-8925-az	POST /api/v2/orders/checkout	504	System.Net.Http.HttpRequestException	PaymentGatewayClient.AuthorizeCharge	The payment authorization request returned a 504 Gateway Timeout.
-Correlation findings
-Three of the five requests failed, producing a 60% request failure rate.
-All three failures occurred in OrderingMicroservice.
-Operations op-8921-az and op-8922-az failed while executing OrderRepository.SaveOrderAsync.
-Operation op-8925-az failed while calling PaymentGatewayClient.AuthorizeCharge.
-The Catalog and Inventory requests completed successfully.
-3. Downstream Dependency Failure Rate Matrix
-Dependency Target	Dependency Type	Total Calls	Failed Calls	Failure Rate	Average Duration	Operational Healthsql-ecommerce-prod.database.windows.net | OrderDb	SQL	2	2	100%	3035.0 ms	Critical
-Target not recorded	HTTP	1	1	100%	4980.0 ms	Critical
-cosmosdb-catalog-prod.documents.azure.com	Azure DocumentDB	1	0	0%	12.5 ms	Healthy
-redis-cache-prod.redis.cache.windows.net:6380	Redis	1	0	0%	3.2 ms	Healthy
-Dependency findings
-The SQL OrderDb dependency failed on both recorded calls.
-The two SQL calls took 3050.0 ms and 3020.0 ms, with an average duration of 3035.0 ms.
-The payment authorization HTTP dependency failed with status 504 after 4980.0 ms.
-The HTTP dependency target is blank in the supplied telemetry, so a target such as api.stripe.com must not be invented.
-Cosmos DB and Redis were successful and responded quickly.
-4. Root-Cause Diagnosis and Alert Rule
-Primary root cause
-
-Failing component: OrderingMicroservice and its downstream dependencies.
-
-Root-cause explanation:
-
-The checkout failures have two separate downstream causes:
-
-Two checkout requests failed with HTTP 500 because calls to the SQL stored procedure sp_InsertCustomerOrder timed out. Both related SQL dependencies failed after approximately three seconds.
-One checkout request failed with HTTP 504 because the payment authorization dependency did not respond before the gateway timeout.
-
-The strongest repeated failure is the SQL dependency because it failed in two separate operations. The likely primary incident is therefore an OrderDb timeout affecting order persistence. The payment gateway timeout is an additional downstream failure affecting checkout processing.
-
-Recommended Azure Monitor alert configuration
-
-Alert name: OrderingMicroservice Checkout Failure Alert
-
-Signal logic:
-
-requests
-| where timestamp >= ago(5m)
-| where cloud_RoleName == "OrderingMicroservice"
-| summarize
-    TotalRequests=count(),
-    FailedRequests=countif(success == false)
-| extend FailureRate=100.0 * FailedRequests / TotalRequests
-| where FailedRequests >= 2 or FailureRate >= 20
-
-
-Threshold and frequency:
-
-Evaluation frequency: Every 5 minutes
-Lookback period: 5 minutes
-Trigger when:
-Failed requests are 2 or more, or
-Failure rate is 20% or higher
-Severity: Sev 2
-Action group: Notify the OrderingMicroservice support team through email or Microsoft Teams.
-Recommended SQL dependency alert
-dependencies
-| where timestamp >= ago(5m)
-| where type == "SQL"
-| where target contains "OrderDb"
-| summarize
-    TotalCalls=count(),
-    FailedCalls=countif(success == false),
-    AverageDurationMs=avg(duration)
-| extend FailureRate=100.0 * FailedCalls / TotalCalls
-| where FailedCalls >= 2 or FailureRate >= 20 or AverageDurationMs > 2000
-
-
-Trigger the SQL alert when at least two calls fail, the failure rate reaches 20%, or the average dependency duration exceeds 2000 ms.
-
-Conclusion
-
-The telemetry identifies OrderingMicroservice as the affected service. Two checkout operations failed because OrderDb timed out during sp_InsertCustomerOrder, while another failed because payment authorization returned a 504 Gateway Timeout. Catalog and inventory dependencies remained healthy. The immediate investigation should focus on SQL stored-procedure performance, database blocking, connection-pool saturation, and payment-gateway timeout handling.
-
-Main changes made: The placeholder operation IDs and dependency names from the screenshots were replaced with the exact values from your supplied JSON. The calculations, correlation table, KQL queries, root cause, and alert thresholds were also completed without inventing missing telemetry.
+{
+  "metadata": {
+    "aws_account_id": "123456789012",
+    "region": "us-east-1",
+    "service_name": "checkout-serverless-lambda",
+    "log_group": "/aws/lambda/checkout-processor"
+  },
+  "cloudwatch_logs": [
+    {
+      "timestamp": "2026-11-14T10:15:20.100Z",
+      "logStreamName": "2026/11/14/[$LATEST]c18a29b4e1",
+      "message": "START RequestId: req-aws-001 Version: $LATEST",
+      "trace_id": "1-6735c028-98fbc12e8412891234567801"
+    },
+    {
+      "timestamp": "2026-11-14T10:15:21.350Z",
+      "logStreamName": "2026/11/14/[$LATEST]c18a29b4e1",
+      "message": "2026-11-14T10:15:21.350Z req-aws-001 INFO [X-Ray Trace: 1-6735c028-98fbc12e8412891234567801] Initializing DynamoDB Client",
+      "trace_id": "1-6735c028-98fbc12e8412891234567801"
+    },
+    {
+      "timestamp": "2026-11-14T10:15:21.410Z",
+      "logStreamName": "2026/11/14/[$LATEST]c18a29b4e1",
+      "message": "2026-11-14T10:15:21.410Z req-aws-001 INFO DynamoDB item saved successfully in 55ms",
+      "trace_id": "1-6735c028-98fbc12e8412891234567801"
+    },
+    {
+      "timestamp": "2026-11-14T10:15:28.250Z",
+      "logStreamName": "2026/11/14/[$LATEST]c18a29b4e1",
+      "message": "2026-11-14T10:15:28.250Z req-aws-001 ERROR [X-Ray Trace: 1-6735c028-98fbc12e8412891234567801] PaymentProviderException: SocketTimeoutException connecting to partner payment service after 6800ms",
+      "trace_id": "1-6735c028-98fbc12e8412891234567801"
+    },
+    {
+      "timestamp": "2026-11-14T10:15:28.320Z",
+      "logStreamName": "2026/11/14/[$LATEST]c18a29b4e1",
+      "message": "REPORT RequestId: req-aws-001 Duration: 8214.22 ms Billed Duration: 8215 ms Memory Size: 512 MB Max Memory Used: 384 MB Init Duration: 1250.30 ms",
+      "trace_id": "1-6735c028-98fbc12e8412891234567801"
+    },
+    {
+      "timestamp": "2026-11-14T10:16:01.000Z",
+      "logStreamName": "2026/11/14/[$LATEST]c18a29b4e1",
+      "message": "START RequestId: req-aws-002 Version: $LATEST",
+      "trace_id": "1-6735c051-45fed12a9128374619283702"
+    },
+    {
+      "timestamp": "2026-11-14T10:16:01.320Z",
+      "logStreamName": "2026/11/14/[$LATEST]c18a29b4e1",
+      "message": "REPORT RequestId: req-aws-002 Duration: 318.45 ms Billed Duration: 319 ms Memory Size: 512 MB Max Memory Used: 386 MB",
+      "trace_id": "1-6735c051-45fed12a9128374619283702"
+    }
+  ],
+  "xray_trace": {
+    "trace_id": "1-6735c028-98fbc12e8412891234567801",
+    "duration_seconds": 8.214,
+    "root_segment": {
+      "id": "seg-lambda-root-001",
+      "name": "checkout-processor",
+      "start_time": 1731579320.1,
+      "end_time": 1731579328.314,
+      "duration_ms": 8214.0,
+      "aws": {
+        "account_id": "123456789012",
+        "resource_names": [
+          "arn:aws:lambda:us-east-1:123456789012:function:checkout-processor"
+        ],
+        "init_duration_ms": 1250.3
+      },
+      "subsegments": [
+        {
+          "id": "sub-init-001",
+          "name": "Initialization",
+          "start_time": 1731579320.1,
+          "end_time": 1731579321.35,
+          "duration_ms": 1250.3,
+          "type": "ColdStart"
+        },
+        {
+          "id": "sub-dynamodb-002",
+          "name": "DynamoDB:PutItem",
+          "start_time": 1731579321.355,
+          "end_time": 1731579321.41,
+          "duration_ms": 55.0,
+          "namespace": "aws",
+          "http": {
+            "response": {
+              "status": 200
+            }
+          }
+        },
+        {
+          "id": "sub-extpay-003",
+          "name": "ExternalPaymentGateway:Charge",
+          "start_time": 1731579321.42,
+          "end_time": 1731579328.22,
+          "duration_ms": 6800.0,
+          "namespace": "remote",
+          "error": true,
+          "fault": true,
+          "cause": {
+            "exceptions": [
+              {
+                "message": "SocketTimeoutException: Read timed out after 6800ms",
+                "type": "java.net.SocketTimeoutException"
+              }
+            ]
+          },
+          "http": {
+            "response": {
+              "status": 504
+            }
+          }
+        }
+      ]
+    }
+  }
+}
