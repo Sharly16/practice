@@ -1,133 +1,220 @@
-Use the following content to complete dashboard_design_report.md. It is based only on the supplied dashboard specification.
+# Advanced Splunk SPL Timechart & Transaction Auditing Report
 
-Golden Signals Operational Dashboard Layout Design Report
-1. Golden Signals Architectural Mapping
-1. Latency
-Metric: End-to-end HTTP request duration using P50, P90, and P99 percentiles.
-Measurement: P99 latency is calculated from http_request_duration_seconds_bucket.
-Success versus error: Latency should be separated by service and, where available, HTTP status so successful and failed requests can be compared.
-Thresholds: Below 400 ms is nominal, 400–800 ms is warning, and 800 ms or more is critical.
-2. Traffic
-Metric: HTTP requests per second grouped by service.
-Measurement: Traffic is calculated using the one-minute rate of http_requests_total.
-Unit of demand: Requests per second.
-Thresholds: A 30% deviation from baseline is a warning, while a 60% deviation is critical.
-3. Errors
-Metric: Percentage of HTTP requests returning 5xx status codes.
-Measurement: The 5xx request rate is divided by the total request rate and multiplied by 100.
-Classification: Errors are explicitly identified using HTTP statuses matching 5...
-Thresholds: Below 0.5% is nominal, 0.5–2% is warning, and 2% or more is critical.
-4. Saturation
-Metric: Cluster compute and memory utilization.
-Measurement: Average resource utilization percentage grouped by resource.
-Leading indicators: High CPU or memory utilization can indicate capacity exhaustion before service failures occur.
-Thresholds: Below 75% is nominal, 75–85% is warning, and 85% or more is critical.
-2. Visual Layout Hierarchy and Information Flow
+## 1. Timechart Query Formulation & Error Spike Analysis
 
-The dashboard uses four tiers to support fast NOC triage. Operators begin with global service health and move downward into increasingly detailed diagnostics.
+The Splunk `timechart` query is used to analyze request volume, successful requests, server-side errors, and average response duration in 15-minute intervals.
 
-Tier 1: Executive Overview and Global Service Health
+### A. SPL Timechart Query
 
-Panels:
+index="ecommerce_checkout"
+| timechart span=15m count AS Total_Requests count(eval(status=200)) AS Success_200 count(eval(status>=500 AND status<600)) AS Errors_5xx avg(duration_ms) AS Average_Duration_ms
 
-Overall SLO Compliance
-Active P1/P2 Incidents
-Global Request Traffic
+### B. Timechart Summary Table
 
-Panel types: Stat panels.
+| Time Window (Span: 15m) | Total Requests | Success (200 OK) | Errors (5xx) | Average Duration (ms) | Severity Assessment |
+|---|---:|---:|---:|---:|---|
+| 10:00-10:15 | 4 | 4 | 0 | Normal | Informational |
+| 10:15-10:30 | 5 | 4 | 1 | 1180.0 | Critical |
+| 10:30-10:45 | 4 | 4 | 0 | 147.5 | Informational |
+| 10:45-11:00 | 3 | 2 | 1 | 1713.3 | Critical |
+| 11:00-11:15 | 4 | 4 | 0 | 187.5 | Informational |
 
-Operational purpose: Provides an immediate overview of business service health. Leadership and NOC operators can quickly determine whether SLOs are being met, whether major incidents are active, and whether global traffic is normal.
+### Analysis
 
-Tier 2: The Four Golden Signals
+The main error spikes occurred during the **10:15-10:30** and **10:45-11:00** windows. Each interval contains a 5xx error and a significantly higher average response duration.
 
-Panels:
+The 10:15-10:30 interval has an average duration of approximately **1180 ms**, while the 10:45-11:00 interval reaches approximately **1713.3 ms**. This indicates that server-side failures are associated with increased transaction latency.
 
-End-to-End Latency Percentiles
-HTTP Throughput by Service
-HTTP 5xx Error Rate
-Cluster Compute and Memory Saturation
+---
 
-Panel types: Time-series panels and gauge.
+## 2. Session Transaction Grouping (`transaction`)
 
-Operational purpose: Answers the four initial incident questions:
+The `transaction` command groups individual checkout events belonging to the same `session_id` into complete user sessions. This makes it possible to identify completed, failed, and abandoned checkout journeys.
 
-Is the platform slow?
-Is traffic increasing or decreasing?
-Is the platform failing?
-Are resources becoming full?
-Tier 3: Component and Dependency Breakdown
+### A. SPL Transaction Query
 
-Panels:
+index="ecommerce_checkout"
+| transaction session_id startswith=(step="cart_view") endswith=(step="order_complete")
+| eval session_duration_sec=round(duration,2)
+| eval final_status=if(mvfind(step,"order_complete")>=0,"COMPLETE",if(mvfind(status,"500")>=0 OR mvfind(status,"502")>=0 OR mvfind(status,"503")>=0 OR mvfind(status,"504")>=0,"FAILED","ABANDONED"))
+| table session_id user_id step session_duration_sec final_status status
 
-Database Connection Pool Utilization
-External Third-Party API Response Times
+### B. Transaction Session Breakdown Table
 
-Panel types: Bar gauge and time series.
+| Session ID | User ID | Steps Completed | Session Duration | Final Status | Primary Failure Cause |
+|---|---|---|---|---|---|
+| sess_101 | usr_901 | cart_view → checkout_start → payment_submit → order_complete | Completed normally | COMPLETE | None |
+| sess_102 | usr_902 | cart_view → checkout_start → payment_submit | Payment request reached 5100 ms | FAILED | HTTP 504 Gateway Timeout during payment |
+| sess_103 | usr_903 | cart_view → checkout_start → payment_submit → order_complete | Completed normally | COMPLETE | None |
+| sess_104 | usr_904 | Checkout did not reach order completion | Incomplete checkout | ABANDONED | User/session dropped before completion |
+| sess_105 | usr_905 | cart_view → checkout_start → payment_submit | Payment request reached 4800 ms | FAILED | HTTP 500 Internal Server Error during payment |
+| sess_106 | usr_906 | cart_view → checkout_start → payment_submit → order_complete | Completed normally | COMPLETE | None |
 
-Operational purpose: Identifies whether degradation originates from database connection exhaustion or a slow external provider.
+### Transaction Analysis
 
-Tier 4: Deep-Dive Infrastructure Diagnostics
+A total of **6 checkout sessions** were initiated.
 
-Panels:
+Out of these sessions:
 
-JVM Garbage Collection Pause Time
-Host Disk I/O Queue Depth
+- **3 sessions completed successfully**
+- **2 sessions encountered server-side payment failures**
+- **1 session did not progress to successful completion**
 
-Panel type: Time series.
+The most important failure point is the **payment stage**, where long-running requests and 5xx responses prevent customers from reaching `order_complete`.
 
-Operational purpose: Supports infrastructure engineers during detailed investigation of runtime and host-level performance issues.
+---
 
-3. Panel Thresholding and Alert Indicators
-Signal or Metric	Nominal (Green)	Warning (Yellow/Orange)	Critical (Red)	VisualizationSLO Compliance	≥99.9%	99.0–99.89%	<99.0%	Stat
-P99 Latency	<400 ms	400–800 ms	≥800 ms	Time series
-HTTP 5xx Error Rate	<0.5%	0.5–2.0%	≥2.0%	Time series
-Resource Saturation	<75%	75–85%	≥85%	Gauge
-DB Connection Pool	<70%	70–85%	≥85%	Bar gauge
+## 3. Splunk CSV Lookup Enrichment (`lookup`)
 
-Additional thresholds include:
+The `error_codes_lookup.csv` file maps HTTP status codes to meaningful error names, categories, severity classifications, and on-call notification tiers.
 
-Active incidents: zero is green, one is warning, and two or more are critical.
-External API latency: below 300 ms is green, 300–1000 ms is warning, and 1000 ms or more is critical.
-JVM GC pause: below 0.1 seconds is green, 0.1–0.5 seconds is warning, and 0.5 seconds or more is critical.
-Disk I/O queue depth: below 2 is green, 2–5 is warning, and 5 or more is critical.
+### A. SPL Lookup Query
 
-The dashboard should use green for normal operation, yellow or orange for warning, and red for critical conditions.
+index="ecommerce_checkout"
+| lookup error_codes_lookup.csv status OUTPUT error_name error_category severity oncall_tier
+| table timestamp session_id user_id step status error_name error_category severity oncall_tier duration_ms
 
-4. Cognitive Ergonomics and Anti-Patterns Avoided
-1. Metric Clutter Avoidance
+### B. Enriched Lookup Field Mappings
 
-Principle: Only high-priority metrics are displayed in the main dashboard.
+| HTTP Status Code | Enriched Error Name | Enriched Error Category | Severity Level | On-Call Notification Tier |
+|---:|---|---|---|---|
+| 200 | OK | Success | Informational | None |
+| 500 | Internal Server Error | Server Fault | Critical | Tier-2 |
+| 504 | Gateway Timeout | Upstream Timeout | Critical | Tier-2 |
 
-Executive indicators are placed at the top, while component and infrastructure metrics appear in lower tiers. This prevents operators from being overwhelmed by low-level data during initial triage.
+### Additional Lookup Values
 
-2. Consistent Color Coding
+The lookup also classifies:
 
-Principle: The same health colors are used across all panels.
+- **400** → Bad Request → Client Error → Warning → Tier-1
+- **401** → Unauthorized → Auth Error → Warning → Tier-1
+- **404** → Not Found → Client Error → Warning → Tier-1
+- **502** → Bad Gateway → Network/Upstream → Critical → Tier-2
+- **503** → Service Unavailable → Capacity → Critical → Tier-2
 
-Green indicates normal operation.
-Yellow or orange indicates warning.
-Red indicates critical degradation.
+### Lookup Analysis
 
-Consistent colors help operators recognize severity without reading every value.
+The lookup enrichment converts numerical HTTP status codes into operationally meaningful information.
 
-3. Standardized Time Windows
+The observed HTTP **500** event is classified as a **Server Fault**, while HTTP **504** is classified as an **Upstream Timeout**. Both have **Critical** severity and require **Tier-2** notification.
 
-Principle: Related metrics use consistent rate windows and the dashboard refreshes every 15 seconds.
+This enrichment makes Splunk results easier for operations teams to interpret and helps determine the appropriate escalation path.
 
-Short windows such as one minute support rapid traffic monitoring, while five-minute windows reduce noise for latency and error-rate calculations. Consistent time ranges prevent misleading comparisons.
+---
 
-Anti-Patterns Avoided
-Too many unrelated panels in one row
-Using different colors for the same severity
-Mixing executive and infrastructure metrics
-Displaying raw counters instead of rates
-Using gauges for historical trends
-Creating alerts without clear thresholds
-Placing detailed metrics above global service health
-Conclusion
+## 4. Multi-Step Funnel Conversion & Drop-off Calculation
 
-The dashboard organizes operational information into four levels: global health, Golden Signals, component dependencies, and infrastructure diagnostics. This structure allows NOC operators and SRE incident commanders to move from detection to root-cause analysis quickly.
+The checkout funnel consists of four monitored steps:
 
-The dashboard measures latency, traffic, errors, and saturation using suitable visualizations and clearly defined green, warning, and critical thresholds. The 15-second refresh cadence supports active monitoring, while the hierarchical layout reduces cognitive load and alert fatigue.
+1. `cart_view`
+2. `checkout_start`
+3. `payment_submit`
+4. `order_complete`
 
-Main changes: The incomplete placeholders were filled using the exact rows, panels, thresholds, visualizations, and purposes from the supplied JSON.
+### SPL Funnel Query
+
+index="ecommerce_checkout"
+| stats dc(session_id) AS sessions BY step
+| eval funnel_order=case(step="cart_view",1,step="checkout_start",2,step="payment_submit",3,step="order_complete",4)
+| sort funnel_order
+| table step sessions
+
+### Funnel Progression Matrix
+
+| Funnel Step Name | Total Sessions Reaching Step | Drop-off Count at Step | Step Conversion Rate (%) |
+|---|---:|---:|---:|
+| **1. cart_view** | 6 | 0 | 100.0% |
+| **2. checkout_start** | 6 | 2 | 100.0% |
+| **3. payment_submit** | 4 | 1 | 66.7% |
+| **4. order_complete** | 3 | 0 | 75.0% |
+
+### Funnel Summary Metrics
+
+- **Total Sessions Initiated:** 6
+- **Total Sessions Successfully Completed:** 3
+- **Overall Checkout Completion Rate (%):** 50.0%
+- **Overall Drop-off Rate (%):** 50.0%
+- **Primary Technical Bottleneck Stage:** Payment processing / `payment_submit`
+
+### Funnel Analysis
+
+All **6 sessions** reached `cart_view` and `checkout_start`.
+
+Only **4 sessions** progressed to `payment_submit`, which represents the first major funnel loss.
+
+Only **3 sessions** eventually reached `order_complete`.
+
+Therefore, the overall conversion from the beginning of the checkout funnel to successful order completion is:
+
+**3 / 6 × 100 = 50%**
+
+The overall drop-off rate is:
+
+**(6 - 3) / 6 × 100 = 50%**
+
+The primary technical bottleneck is associated with the **payment stage**, where HTTP 500 and HTTP 504 errors are observed along with unusually high response durations.
+
+---
+
+## 5. Architectural Remediation & Summary
+
+The investigation shows that payment processing is the most important reliability bottleneck. Server-side failures and gateway timeouts increase latency and prevent checkout sessions from completing.
+
+### 1. Payment Gateway Resilience
+
+**Recommendation:**
+
+Implement controlled retries for transient upstream payment failures using exponential backoff. HTTP 502, 503, and 504 responses should be retried only when the operation is safe and idempotent.
+
+Payment requests should use idempotency keys to prevent duplicate charges when a retry occurs.
+
+---
+
+### 2. Session Persistence & Abandonment Recovery
+
+**Recommendation:**
+
+Persist checkout session state so customers do not lose cart and checkout progress when a downstream service fails.
+
+Maintain states such as:
+
+- cart created
+- checkout started
+- payment pending
+- payment failed
+- order completed
+
+Incomplete transactions should be recoverable instead of requiring customers to restart the entire checkout workflow.
+
+---
+
+### 3. Database Timeout Protection
+
+**Recommendation:**
+
+Define explicit connection and query timeout thresholds for database operations. Monitor database connection pools, slow queries, and resource utilization.
+
+Use circuit-breaker or fail-fast behavior when a dependent service becomes unhealthy rather than allowing requests to wait indefinitely.
+
+---
+
+## Final Investigation Summary
+
+The advanced Splunk investigation analyzed **24 ecommerce events across 6 user sessions**.
+
+The investigation identified two important 5xx failure periods. These periods also showed substantially higher average request duration compared with successful intervals.
+
+Transaction analysis showed that only **3 of the 6 initiated sessions reached successful order completion**, producing an overall checkout completion rate of **50%**.
+
+The CSV lookup enriched raw status codes with operational context. HTTP **500 Internal Server Error** was classified as a **Critical Server Fault**, while HTTP **504 Gateway Timeout** was classified as a **Critical Upstream Timeout**. Both map to **Tier-2** escalation.
+
+Funnel analysis showed:
+
+- `cart_view`: **6 sessions**
+- `checkout_start`: **6 sessions**
+- `payment_submit`: **4 sessions**
+- `order_complete`: **3 sessions**
+
+The resulting overall checkout completion rate is **50%**, with the main reliability concern centered around the payment portion of the workflow.
+
+Recommended remediation includes resilient and idempotent payment retry handling, persistent checkout session state, stronger timeout protection, and operational monitoring of payment and downstream service failures.
